@@ -936,17 +936,136 @@ const App: React.FC = () => {
   const BulkSendModal = ({ type }: { type: 'INIT' | 'REMIND' }) => {
     const isOpen = type === 'INIT' ? isBulkSendOpen : isReminderOpen;
     const setIsOpen = type === 'INIT' ? setIsBulkSendOpen : setIsReminderOpen;
+    
+    const [index, setIndex] = useState(0);
+    const [showSkipConfirm, setShowSkipConfirm] = useState(false);
+
+    useEffect(() => {
+      if (isOpen) {
+        setIndex(0);
+        setShowSkipConfirm(false);
+      }
+    }, [isOpen]);
+
     if (!isOpen) return null;
+    
+    const people = prodPeople;
+    if (people.length === 0) {
+      return (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3.5rem] p-12 border border-slate-200 dark:border-white/10 shadow-2xl relative text-center">
+             <button onClick={() => setIsOpen(false)} className="absolute top-8 right-8 p-2 text-slate-500"><X /></button>
+             <h3 className="text-2xl font-black mb-4">Nessun destinatario</h3>
+             <p className="text-slate-500 mb-8 font-medium">Aggiungi membri alla crew per inviare richieste.</p>
+             <button onClick={() => setIsOpen(false)} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold">Chiudi</button>
+          </div>
+        </div>
+      );
+    }
+
+    const currentPerson = people[index];
+    const isLast = index === people.length - 1;
+    
+    const personInstances = prodInstances.filter(i => i.personId === currentPerson.id && i.productionId === selectedProdId);
+    const targetInstances = type === 'INIT' 
+      ? personInstances.filter(i => i.status === DocStatus.NOT_SENT)
+      : personInstances.filter(i => i.status === DocStatus.SENT);
+      
+    const isAlreadyActioned = targetInstances.length === 0;
+
+    const handleOpenWA = () => {
+      const link = getPublicLink(currentPerson);
+      const message = type === 'INIT' 
+        ? `Ciao ${currentPerson.name}, ti ho inviato i documenti da firmare per ${activeProduction?.title}. Puoi accedere qui: ${link}`
+        : `Ciao ${currentPerson.name}, ti ricordo di firmare i documenti per ${activeProduction?.title}. Puoi accedere qui: ${link}`;
+      
+      window.open(`https://wa.me/${currentPerson.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`, '_blank');
+    };
+
+    const handleMarkActioned = () => {
+      const now = new Date().toISOString();
+      setData(prev => ({
+        ...prev,
+        instances: prev.instances.map(inst => 
+          (inst.personId === currentPerson.id && inst.productionId === selectedProdId && (type === 'INIT' ? inst.status === DocStatus.NOT_SENT : inst.status === DocStatus.SENT))
+            ? { ...inst, status: DocStatus.SENT, sentAt: now }
+            : inst
+        )
+      }));
+    };
+
+    const handleNext = (force: boolean = false) => {
+      if (!isAlreadyActioned && !showSkipConfirm && !force) {
+        setShowSkipConfirm(true);
+        return;
+      }
+      
+      setShowSkipConfirm(false);
+      if (isLast) {
+        setIsOpen(false);
+        setTimeout(() => alert('Workflow completato'), 300);
+      } else {
+        setIndex(prev => prev + 1);
+      }
+    };
+
     return (
       <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-        <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3.5rem] p-12 border border-slate-200 dark:border-white/10 shadow-2xl">
-          <div className="w-16 h-16 bg-indigo-600/10 text-indigo-600 rounded-3xl flex items-center justify-center mb-8"><Send className="w-8 h-8" /></div>
-          <h3 className="text-3xl font-black text-slate-900 dark:text-white leading-tight mb-4">{type === 'INIT' ? 'Invia Richieste Firma' : 'Invia Solleciti'}</h3>
-          <p className="text-slate-500 dark:text-slate-400 mb-10 font-medium leading-relaxed">Verranno generati i link univoci e inviati via WhatsApp a tutta la lista selezionata ({prodPeople.length} destinatari).</p>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <button onClick={() => setIsOpen(false)} className="flex-1 py-5 bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 font-black rounded-[2rem] hover:bg-slate-200 transition-all text-sm uppercase tracking-widest order-2 sm:order-1">Annulla</button>
-            <button onClick={() => { setIsOpen(false); alert('Messaggi inviati con successo!'); }} className="flex-1 py-5 bg-indigo-600 text-white font-black rounded-[2rem] shadow-xl hover:bg-indigo-700 transition-all text-sm uppercase tracking-widest order-1 sm:order-2">Invia Ora</button>
+        <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3.5rem] p-10 sm:p-12 border border-slate-200 dark:border-white/10 shadow-2xl relative">
+          <button onClick={() => setIsOpen(false)} className="absolute top-8 right-8 p-2 bg-slate-100 dark:bg-white/5 rounded-2xl text-slate-500 hover:text-red-500 transition-all"><X className="w-6 h-6" /></button>
+          
+          <div className="mb-8">
+            <h3 className="text-3xl font-black text-slate-900 dark:text-white leading-tight">{type === 'INIT' ? 'Invia Richieste' : 'Invia Solleciti'}</h3>
+            <p className="text-slate-500 dark:text-slate-400 font-medium">Stai gestendo {people.length} persone.</p>
           </div>
+
+          <div className="space-y-8">
+            <div className="text-center">
+               <p className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-[0.2em] mb-4">DESTINATARIO {index + 1} DI {people.length}</p>
+               <div className="bg-slate-50 dark:bg-white/5 p-8 rounded-[2.5rem] border border-slate-100 dark:border-white/10 shadow-inner">
+                  <p className="text-xl font-black text-slate-900 dark:text-white truncate">{currentPerson.name}</p>
+                  <p className="text-sm font-bold text-slate-400 mt-1">{currentPerson.whatsapp}</p>
+               </div>
+            </div>
+
+            <div className="space-y-4">
+              <button 
+                onClick={handleOpenWA}
+                className="w-full py-5 bg-green-500 text-white rounded-[2rem] font-black text-lg hover:bg-green-600 shadow-xl shadow-green-500/20 transition-all flex items-center justify-center gap-3"
+              >
+                <MessageSquare className="w-6 h-6" /> Apri WhatsApp
+              </button>
+
+              <div className="grid grid-cols-2 gap-4">
+                <button 
+                  onClick={handleMarkActioned}
+                  disabled={isAlreadyActioned}
+                  className={`py-5 rounded-[2rem] font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${isAlreadyActioned ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200'}`}
+                >
+                  {isAlreadyActioned ? <CheckCircle className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                  {isAlreadyActioned ? 'Inviato' : 'Segna come Inviato'}
+                </button>
+                <button 
+                  onClick={() => handleNext()}
+                  className="py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition-all flex items-center justify-center gap-2"
+                >
+                  {isLast ? 'Fine' : 'Avanti →'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {showSkipConfirm && (
+            <div className="absolute inset-0 bg-white/95 dark:bg-slate-900/95 rounded-[3.5rem] flex flex-col items-center justify-center p-10 text-center z-10 animate-fade-in">
+              <AlertCircle className="w-16 h-16 text-amber-500 mb-6" />
+              <h4 className="text-xl font-black text-slate-900 dark:text-white mb-2">Non hai segnato come inviato</h4>
+              <p className="text-slate-500 text-sm mb-8 font-medium">Vuoi proseguire senza segnare come inviato?</p>
+              <div className="flex gap-4 w-full">
+                <button onClick={() => setShowSkipConfirm(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 rounded-2xl font-bold">Resta</button>
+                <button onClick={() => handleNext(true)} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold">Prosegui</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
