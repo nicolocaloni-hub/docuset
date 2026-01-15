@@ -26,9 +26,12 @@ const STORAGE_KEY = 'setdocs_app_data_v4';
 const THEME_KEY = 'setdocs_theme';
 const REMOTE_VAULT_KEY = 'setdocs_remote_vault';
 
+// Environment variables for Supabase and App URL
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+const PUBLIC_APP_URL = process.env.VITE_PUBLIC_APP_URL || window.location.origin;
+
 // Safely initialize Supabase client
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 const SignatureCanvas = ({ onSave, onClear }: { onSave: (data: string) => void; onClear: () => void }) => (
@@ -190,7 +193,7 @@ const App: React.FC = () => {
       const path = window.location.pathname;
       const hash = window.location.hash;
       
-      // Handle both /sign/hub/TOKEN and #/form/TOKEN
+      // Support path-based /sign/hub/:token and legacy hash-based #/form/:token
       if (path.includes('/sign/hub/')) {
         const parts = path.split('/sign/hub/');
         setPublicFormToken(parts[parts.length - 1] || null);
@@ -224,56 +227,103 @@ const App: React.FC = () => {
     setIsSyncing(true);
     
     try {
+      // Sync from Supabase sign_requests table
+      if (supabase) {
+        const { data: signedRequests, error } = await supabase
+          .from('sign_requests')
+          .select('*')
+          .eq('status', 'Signed')
+          .eq('production_id', selectedProdId);
+
+        if (!error && signedRequests) {
+          let newData = { ...data };
+          let updatedCount = 0;
+
+          for (const req of signedRequests) {
+            const instanceIdx = newData.instances.findIndex(i => 
+              i.personId === req.person_id && 
+              i.templateId === req.template_id && 
+              i.status !== DocStatus.SIGNED
+            );
+            if (instanceIdx === -1) continue;
+
+            const instance = newData.instances[instanceIdx];
+            const template = newData.templates.find(t => t.id === instance.templateId);
+            const person = newData.people.find(p => p.id === instance.personId);
+
+            if (!template || !person || !req.form_data) continue;
+
+            const filledData: Record<string, string> = {
+              name: `${req.form_data.firstName} ${req.form_data.lastName}`,
+              date: new Date(req.signed_at).toLocaleDateString('it-IT'),
+              taxCode: req.form_data.taxCode,
+              role: req.form_data.role,
+              idNumber: req.form_data.idNumber
+            };
+
+            const { url, hash } = await generateSignedPdf(template, filledData, req.form_data.signature);
+            const audit = {
+              submittedAt: req.signed_at,
+              userAgent: 'Recipient Device',
+              pdfHash: hash
+            };
+
+            newData.instances[instanceIdx] = {
+              ...instance,
+              status: DocStatus.SIGNED,
+              signedAt: req.signed_at,
+              finalPdfUrl: url,
+              auditJSON: JSON.stringify(audit)
+            };
+            updatedCount++;
+          }
+
+          if (updatedCount > 0) {
+            setData(newData);
+          }
+        }
+      }
+
+      // Legacy fallback for local sync
       const remoteVault = JSON.parse(localStorage.getItem(REMOTE_VAULT_KEY) || '[]');
       const submittedForms = remoteVault.filter((f: any) => f.status === 'SUBMITTED');
 
-      if (submittedForms.length === 0) {
-        setIsSyncing(false);
-        return;
-      }
+      if (submittedForms.length > 0) {
+        let newData = { ...data };
+        for (const submission of submittedForms) {
+          const instanceIdx = newData.instances.findIndex(i => i.id === submission.instanceId && i.status !== DocStatus.SIGNED);
+          if (instanceIdx === -1) continue;
 
-      let newData = { ...data };
-      let updatedCount = 0;
+          const instance = newData.instances[instanceIdx];
+          const template = newData.templates.find(t => t.id === instance.templateId);
+          const person = newData.people.find(p => p.id === instance.personId);
 
-      for (const submission of submittedForms) {
-        const instanceIdx = newData.instances.findIndex(i => i.id === submission.instanceId && i.status !== DocStatus.SIGNED);
-        if (instanceIdx === -1) continue;
+          if (!template || !person) continue;
 
-        const instance = newData.instances[instanceIdx];
-        const template = newData.templates.find(t => t.id === instance.templateId);
-        const person = newData.people.find(p => p.id === instance.personId);
+          const filledData: Record<string, string> = {
+            name: `${submission.formData.firstName} ${submission.formData.lastName}`,
+            date: new Date(submission.submittedAt).toLocaleDateString('it-IT'),
+            taxCode: submission.formData.taxCode,
+            role: submission.formData.role,
+            idNumber: submission.formData.idNumber
+          };
 
-        if (!template || !person) continue;
+          const { url, hash } = await generateSignedPdf(template, filledData, submission.formData.signature);
+          const audit = {
+            submittedAt: submission.submittedAt,
+            userAgent: submission.userAgent,
+            pdfHash: hash
+          };
 
-        const filledData: Record<string, string> = {
-          name: `${submission.formData.firstName} ${submission.formData.lastName}`,
-          date: new Date(submission.submittedAt).toLocaleDateString('it-IT'),
-          taxCode: submission.formData.taxCode,
-          role: submission.formData.role,
-          idNumber: submission.formData.idNumber
-        };
-
-        const { url, hash } = await generateSignedPdf(template, filledData, submission.formData.signature);
-        const audit = {
-          submittedAt: submission.submittedAt,
-          userAgent: submission.userAgent,
-          pdfHash: hash
-        };
-
-        newData.instances[instanceIdx] = {
-          ...instance,
-          status: DocStatus.SIGNED,
-          signedAt: submission.submittedAt,
-          finalPdfUrl: url,
-          auditJSON: JSON.stringify(audit)
-        };
-
-        submission.status = 'PROCESSED';
-        submission.processedAt = new Date().toISOString();
-        updatedCount++;
-      }
-
-      if (updatedCount > 0) {
+          newData.instances[instanceIdx] = {
+            ...instance,
+            status: DocStatus.SIGNED,
+            signedAt: submission.submittedAt,
+            finalPdfUrl: url,
+            auditJSON: JSON.stringify(audit)
+          };
+          submission.status = 'PROCESSED';
+        }
         setData(newData);
         localStorage.setItem(REMOTE_VAULT_KEY, JSON.stringify(remoteVault));
       }
@@ -289,38 +339,32 @@ const App: React.FC = () => {
     if (!selectedProdId || !supabase) return;
 
     const channel = supabase
-      .channel(`public_forms_${selectedProdId}`)
+      .channel(`sign_requests_${selectedProdId}`)
       .on('postgres_changes', 
-        { event: 'UPDATE', schema: 'public', table: 'public_forms', filter: `productionId=eq.${selectedProdId}` },
+        { event: 'UPDATE', schema: 'public', table: 'sign_requests', filter: `production_id=eq.${selectedProdId}` },
         (payload) => {
-          const { status, personName, personId, token, docInstanceId, submittedAt } = payload.new;
+          const { status, person_name, person_id, token, signed_at } = payload.new;
           const oldStatus = payload.old.status;
 
-          if (status === 'SUBMITTED' && oldStatus !== 'SUBMITTED') {
-            const dedupeKey = `${docInstanceId}_SUBMITTED`;
-            const exists = data.notifications.some(n => (n as any).dedupeKey === dedupeKey);
-            
-            if (!exists) {
-              const newNotif: AppNotification = {
-                id: 'n-' + Date.now() + Math.random(),
-                productionId: selectedProdId,
-                personId: personId,
-                documentInstanceId: docInstanceId,
-                type: 'DOCUMENT_SIGNED',
-                title: 'Nuova Firma',
-                message: `${personName} ha completato e inviato "${token}"`,
-                createdAt: new Date().toISOString(),
-                readAt: null
-              };
-              (newNotif as any).dedupeKey = dedupeKey;
+          if (status === 'Signed' && oldStatus !== 'Signed') {
+            const newNotif: AppNotification = {
+              id: 'n-' + Date.now() + Math.random(),
+              productionId: selectedProdId,
+              personId: person_id,
+              documentInstanceId: token, // Using token as a temp ID
+              type: 'DOCUMENT_SIGNED',
+              title: 'Nuova Firma',
+              message: `${person_name} ha firmato i documenti.`,
+              createdAt: new Date().toISOString(),
+              readAt: null
+            };
 
-              setData(prev => ({
-                ...prev,
-                notifications: [newNotif, ...prev.notifications]
-              }));
-              
-              syncSubmissions();
-            }
+            setData(prev => ({
+              ...prev,
+              notifications: [newNotif, ...prev.notifications]
+            }));
+            
+            syncSubmissions();
           }
         }
       )
@@ -329,7 +373,7 @@ const App: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedProdId, data.notifications]);
+  }, [selectedProdId]);
 
   const activeProduction = useMemo(() => data.productions.find(p => p.id === selectedProdId), [selectedProdId, data.productions]);
   const prodPeople = useMemo(() => data.people.filter(p => p.productionId === selectedProdId), [selectedProdId, data.people]);
@@ -370,7 +414,7 @@ const App: React.FC = () => {
       role: newMemberData.role || 'Crew',
       department: newMemberData.department || 'General',
       whatsapp: newMemberData.whatsapp || '393330000000',
-      hubToken: 'hub-' + Math.random().toString(36).substr(2, 9)
+      hubToken: crypto.randomUUID() // Ensure unique token per person
     };
     setData(prev => ({ ...prev, people: [...prev.people, newPerson] }));
     setIsNewMemberModalOpen(false);
@@ -393,6 +437,28 @@ const App: React.FC = () => {
     setData(prev => ({ ...prev, instances: prev.instances.filter(i => i.id !== id) }));
   };
 
+  // Fix: Added missing confirmDeleteTemplate function to handle template deletion
+  const confirmDeleteTemplate = () => {
+    if (!templateToDeleteId) return;
+    setData(prev => ({
+      ...prev,
+      templates: prev.templates.filter(t => t.id !== templateToDeleteId),
+      instances: prev.instances.filter(i => i.templateId !== templateToDeleteId)
+    }));
+    setTemplateToDeleteId(null);
+  };
+
+  // Fix: Added missing confirmDeletePerson function to handle person/crew member deletion
+  const confirmDeletePerson = () => {
+    if (!personToDeleteId) return;
+    setData(prev => ({
+      ...prev,
+      people: prev.people.filter(p => p.id !== personToDeleteId),
+      instances: prev.instances.filter(i => i.personId !== personToDeleteId)
+    }));
+    setPersonToDeleteId(null);
+  };
+
   const markNotifRead = (id: string) => {
     setData(prev => ({
       ...prev,
@@ -408,31 +474,8 @@ const App: React.FC = () => {
     }));
   };
 
-  const getPublicLink = (person: Person) => {
-    const origin = window.location.origin;
-    const path = window.location.pathname.replace(/\/$/, '');
-    return `${origin}${path}/#/form/${person.hubToken}`;
-  };
-
-  const confirmDeleteTemplate = () => {
-    if (!templateToDeleteId) return;
-    setData(prev => ({
-      ...prev,
-      templates: prev.templates.filter(t => t.id !== templateToDeleteId)
-    }));
-    setTemplateToDeleteId(null);
-  };
-
-  const confirmDeletePerson = () => {
-    if (!personToDeleteId || !selectedProdId) return;
-    setData(prev => ({
-      ...prev,
-      people: prev.people.filter(p => p.id !== personToDeleteId),
-      instances: prev.instances.filter(i => !(i.personId === personToDeleteId && i.productionId === selectedProdId)),
-      notifications: prev.notifications.filter(n => !(n.personId === personToDeleteId && n.productionId === selectedProdId))
-    }));
-    setPersonToDeleteId(null);
-  };
+  // Build the cross-device compatible link
+  const getSigningHubLink = (token: string) => `${PUBLIC_APP_URL}/sign/hub/${token}`;
 
   const Header = () => (
     <header className="h-20 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl border-b border-slate-200 dark:border-white/5 px-4 sm:px-8 flex items-center justify-between sticky top-0 z-30 transition-all">
@@ -649,7 +692,7 @@ const App: React.FC = () => {
                              <span className={`inline-block px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${inst.status === DocStatus.SIGNED ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600 shadow-sm shadow-amber-500/10'}`}>{inst.status}</span>
                           </td>
                           <td className="px-8 py-6 text-right">
-                             <button onClick={() => { if(p) window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, hai novità per il documento? ${getPublicLink(p)}`)}`, '_blank') }} className="p-3 text-slate-400 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10 rounded-xl transition-all"><MessageSquare className="w-5 h-5" /></button>
+                             <button onClick={() => { if(p) window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, hai novità per il documento? ${getSigningHubLink(p.hubToken)}`)}`, '_blank') }} className="p-3 text-slate-400 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10 rounded-xl transition-all"><MessageSquare className="w-5 h-5" /></button>
                           </td>
                        </tr>
                      );
@@ -745,17 +788,20 @@ const App: React.FC = () => {
                       <div className="flex items-center justify-end gap-2">
                         <button 
                           onClick={async () => {
-                            if (supabase) {
-                              // Track the request in Supabase before opening WA
-                              await supabase.from('sign_requests').upsert({
-                                token: p.hubToken,
-                                production_id: selectedProdId,
-                                person_id: p.id,
-                                status: DocStatus.SENT,
-                                created_at: new Date().toISOString()
-                              }, { onConflict: 'token' });
+                            if (supabase && selectedProdId) {
+                               // Register in Supabase first
+                               await supabase.from('sign_requests').upsert({
+                                 token: p.hubToken,
+                                 production_id: selectedProdId,
+                                 person_id: p.id,
+                                 person_name: p.name,
+                                 template_id: 'bulk', // simplified for multiple
+                                 status: 'Sent',
+                                 created_at: new Date().toISOString()
+                               }, { onConflict: 'token' });
                             }
-                            window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ti ho inviato i documenti da firmare per ${activeProduction?.title}. Puoi accedere qui: ${getPublicLink(p)}`)}`, '_blank');
+                            const link = getSigningHubLink(p.hubToken);
+                            window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ti ho inviato i documenti da firmare per ${activeProduction?.title}. Puoi accedere qui: ${link}`)}`, '_blank');
                           }}
                           className="p-2.5 text-slate-400 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10 rounded-xl transition-all"
                           title="Invia link via WhatsApp"
@@ -763,7 +809,7 @@ const App: React.FC = () => {
                           <MessageSquare className="w-5 h-5" />
                         </button>
                         <button 
-                          onClick={() => { navigator.clipboard.writeText(getPublicLink(p)); alert('Link copiato negli appunti!'); }}
+                          onClick={() => { navigator.clipboard.writeText(getSigningHubLink(p.hubToken)); alert('Link copiato negli appunti!'); }}
                           className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all"
                           title="Copia link hub"
                         >
@@ -863,17 +909,18 @@ const App: React.FC = () => {
                     <td className="px-8 py-6"><span className="px-2 py-1 bg-amber-100 text-amber-700 rounded text-[10px] font-bold">{inst.status}</span></td>
                     <td className="px-8 py-6 text-right">
                        <button onClick={async () => { 
-                         if(p) {
-                           if (supabase) {
-                             await supabase.from('sign_requests').upsert({
+                         if(p && supabase && selectedProdId) {
+                           await supabase.from('sign_requests').upsert({
                                token: p.hubToken,
                                production_id: selectedProdId,
                                person_id: p.id,
-                               status: DocStatus.SENT,
+                               person_name: p.name,
+                               template_id: inst.templateId,
+                               status: 'Sent',
                                created_at: new Date().toISOString()
-                             }, { onConflict: 'token' });
-                           }
-                           window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ti ricordo di firmare il documento: ${getPublicLink(p)}`)}`, '_blank');
+                           }, { onConflict: 'token' });
+                           const link = getSigningHubLink(p.hubToken);
+                           window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ti ricordo di firmare il documento: ${link}`)}`, '_blank');
                          }
                        }} className="p-2 text-green-500 hover:text-green-700 transition-all"><Send className="w-5 h-5" /></button>
                        <button onClick={() => deleteInstance(inst.id)} className="p-2 text-slate-400 hover:text-red-500 transition-all"><Trash2 className="w-4 h-4" /></button>
@@ -934,15 +981,14 @@ const App: React.FC = () => {
   );
 
   const PublicView = () => {
-    const person = useMemo(() => data.people.find(p => p.hubToken === publicFormToken), [publicFormToken, data.people]);
-    if (!person) return <div className="min-h-screen flex items-center justify-center p-6 text-slate-500 font-bold uppercase">Token non trovato localmente. Verifica la connessione.</div>;
-    const instance = data.instances.find(i => i.personId === person.id && i.status !== DocStatus.SIGNED);
-    const template = instance ? data.templates.find(t => t.id === instance.templateId) : null;
-    
-    // Fallback if no instance found but we have a token
-    if (!instance || !template) return <div className="min-h-screen flex items-center justify-center p-6 text-green-500 font-bold uppercase">Tutto firmato o sessione non trovata!</div>;
-    
-    return <PublicForm documentType={template.name} recipientName={person.name} hubToken={person.hubToken} instanceId={instance.id} onComplete={syncSubmissions} />;
+    // If we're on the public signing page, we should fetch from Supabase.
+    // PublicForm will now handle the initialization logic internally via Supabase.
+    return (
+      <PublicForm 
+        hubToken={publicFormToken || ''} 
+        onComplete={syncSubmissions} 
+      />
+    );
   };
 
   const ProductionsContent = () => (
@@ -1007,25 +1053,19 @@ const App: React.FC = () => {
     const currentPerson = people[index];
     const isLast = index === people.length - 1;
     
-    const personInstances = prodInstances.filter(i => i.personId === currentPerson.id && i.productionId === selectedProdId);
-    const targetInstances = type === 'INIT' 
-      ? personInstances.filter(i => i.status === DocStatus.NOT_SENT)
-      : personInstances.filter(i => i.status === DocStatus.SENT);
-      
-    const isAlreadyActioned = targetInstances.length === 0;
-
     const handleOpenWA = async () => {
-      const link = getPublicLink(currentPerson);
-      if (supabase) {
-        // Track the request in Supabase
+      if (supabase && selectedProdId) {
         await supabase.from('sign_requests').upsert({
           token: currentPerson.hubToken,
           production_id: selectedProdId,
           person_id: currentPerson.id,
-          status: DocStatus.SENT,
+          person_name: currentPerson.name,
+          template_id: 'bulk',
+          status: 'Sent',
           created_at: new Date().toISOString()
         }, { onConflict: 'token' });
       }
+      const link = getSigningHubLink(currentPerson.hubToken);
       const message = type === 'INIT' 
         ? `Ciao ${currentPerson.name}, ti ho inviato i documenti da firmare per ${activeProduction?.title}. Puoi accedere qui: ${link}`
         : `Ciao ${currentPerson.name}, ti ricordo di firmare i documenti per ${activeProduction?.title}. Puoi accedere qui: ${link}`;
@@ -1038,7 +1078,7 @@ const App: React.FC = () => {
       setData(prev => ({
         ...prev,
         instances: prev.instances.map(inst => 
-          (inst.personId === currentPerson.id && inst.productionId === selectedProdId && (type === 'INIT' ? inst.status === DocStatus.NOT_SENT : inst.status === DocStatus.SENT))
+          (inst.personId === currentPerson.id && inst.productionId === selectedProdId && inst.status === DocStatus.NOT_SENT)
             ? { ...inst, status: DocStatus.SENT, sentAt: now }
             : inst
         )
@@ -1046,6 +1086,10 @@ const App: React.FC = () => {
     };
 
     const handleNext = (force: boolean = false) => {
+      const personInstances = prodInstances.filter(i => i.personId === currentPerson.id && i.productionId === selectedProdId);
+      const targetInstances = personInstances.filter(i => i.status === DocStatus.NOT_SENT);
+      const isAlreadyActioned = targetInstances.length === 0;
+
       if (!isAlreadyActioned && !showSkipConfirm && !force) {
         setShowSkipConfirm(true);
         return;
@@ -1090,11 +1134,9 @@ const App: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <button 
                   onClick={handleMarkActioned}
-                  disabled={isAlreadyActioned}
-                  className={`py-5 rounded-[2rem] font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${isAlreadyActioned ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200'}`}
+                  className={`py-5 rounded-[2rem] font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200`}
                 >
-                  {isAlreadyActioned ? <CheckCircle className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
-                  {isAlreadyActioned ? 'Inviato' : 'Segna come Inviato'}
+                  <Clock className="w-4 h-4" /> Segna come Inviato
                 </button>
                 <button 
                   onClick={() => handleNext()}
@@ -1154,7 +1196,7 @@ const App: React.FC = () => {
           role: parts[1] || 'Troupe',
           department: 'General',
           whatsapp: parts[2] || '393330000000',
-          hubToken: 'hub-' + Math.random().toString(36).substr(2, 9)
+          hubToken: crypto.randomUUID()
         };
       });
       setData(prev => ({ ...prev, people: [...prev.people, ...newPeople] }));

@@ -15,31 +15,35 @@ import { extractDocumentData } from '../services/gemini';
 import { FormState, DocStatus } from '../types';
 import { createClient } from '@supabase/supabase-js';
 
+// Environment variables for Supabase
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+
 // Safely initialize Supabase client
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 interface PublicFormProps {
-  documentType: string;
-  recipientName: string;
   hubToken: string;
-  instanceId: string;
-  onComplete: (data: FormState) => void;
+  onComplete: (data: any) => void;
 }
 
-const REMOTE_VAULT_KEY = 'setdocs_remote_vault';
-
-const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hubToken, instanceId, onComplete }) => {
+const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [isValidating, setIsValidating] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  
+  const [sessionData, setSessionData] = useState<{
+    person_name: string;
+    template_name: string;
+    production_id: string;
+  } | null>(null);
+
   const [form, setForm] = useState<FormState>({
-    firstName: recipientName.split(' ')[0] || '',
-    lastName: recipientName.split(' ').slice(1).join(' ') || '',
+    firstName: '',
+    lastName: '',
     birthDate: '',
     taxCode: '',
     role: '',
@@ -48,8 +52,9 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
   });
 
   useEffect(() => {
-    const validateToken = async () => {
+    const validateAndFetch = async () => {
       if (!supabase) {
+        setValidationError("Errore di configurazione server.");
         setIsValidating(false);
         return;
       }
@@ -63,17 +68,29 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
 
         if (fetchError || !request) {
           setValidationError("Link non valido o scaduto.");
-        } else if (request.status === 'SIGNED') {
+        } else if (request.status === 'Signed') {
           setValidationError("Documento già firmato.");
         } else if (request.expires_at && new Date(request.expires_at) < new Date()) {
           setValidationError("Link scaduto.");
         } else {
-          // Mark as opened if not already opened
-          if (request.status === 'SENT' || request.status === 'NON INVIATO') {
+          setSessionData({
+            person_name: request.person_name,
+            template_name: request.template_name || 'Documenti di Produzione',
+            production_id: request.production_id
+          });
+          
+          setForm(prev => ({
+            ...prev,
+            firstName: request.person_name.split(' ')[0] || '',
+            lastName: request.person_name.split(' ').slice(1).join(' ') || '',
+          }));
+
+          // Mark as opened
+          if (request.status === 'Sent') {
             await supabase
               .from('sign_requests')
               .update({ 
-                status: 'APERTO', 
+                status: 'Opened', 
                 opened_at: new Date().toISOString() 
               })
               .eq('token', hubToken);
@@ -81,12 +98,15 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
         }
       } catch (err) {
         console.error("Token validation error:", err);
+        setValidationError("Errore di connessione.");
       } finally {
         setIsValidating(false);
       }
     };
 
-    validateToken();
+    if (hubToken) {
+      validateAndFetch();
+    }
   }, [hubToken]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,48 +138,23 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
     }
   };
 
-  const saveToRemoteVault = async (finalForm: FormState) => {
-    // 1. Supabase update
-    if (supabase) {
-      try {
-        // Update both tables for backward compatibility and tracking
-        await Promise.all([
-          supabase
-            .from('public_forms')
-            .upsert({
-              token: hubToken,
-              status: 'SUBMITTED',
-              formData: finalForm,
-              signatureDataUrl: finalForm.signature,
-              submittedAt: new Date().toISOString(),
-              userAgent: navigator.userAgent
-            }, { onConflict: 'token' }),
-          
-          supabase
-            .from('sign_requests')
-            .update({
-              status: 'FIRMATO',
-              signed_at: new Date().toISOString()
-            })
-            .eq('token', hubToken)
-        ]);
-      } catch (err) {
-        console.warn("Supabase push failed, relying on local fallback", err);
-      }
+  const saveToSupabase = async (finalForm: FormState) => {
+    if (!supabase) return;
+    
+    try {
+      // Update the sign_request with form data and status
+      await supabase
+        .from('sign_requests')
+        .update({
+          status: 'Signed',
+          signed_at: new Date().toISOString(),
+          form_data: finalForm
+        })
+        .eq('token', hubToken);
+    } catch (err) {
+      console.error("Supabase submission failed", err);
+      throw err;
     }
-
-    // 2. Local Fallback
-    const vault = JSON.parse(localStorage.getItem(REMOTE_VAULT_KEY) || '[]');
-    const submission = {
-      hubToken,
-      instanceId,
-      formData: finalForm,
-      submittedAt: new Date().toISOString(),
-      userAgent: navigator.userAgent,
-      status: 'SUBMITTED'
-    };
-    vault.push(submission);
-    localStorage.setItem(REMOTE_VAULT_KEY, JSON.stringify(vault));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -169,9 +164,14 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
       window.scrollTo(0, 0);
     } else {
       setIsSubmitting(true);
-      await saveToRemoteVault(form);
-      onComplete(form);
-      setIsSubmitting(false);
+      try {
+        await saveToSupabase(form);
+        onComplete(form);
+      } catch (err) {
+        setError("Errore durante l'invio. Riprova.");
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -229,9 +229,9 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
             {step === 3 && "Concludi e Firma"}
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">
-            {step === 1 && `Ciao ${recipientName}, carica il tuo documento per compilare i campi in un istante.`}
+            {step === 1 && `Ciao ${sessionData?.person_name}, carica il tuo documento per compilare i campi in un istante.`}
             {step === 2 && "Verifica che le informazioni siano corrette prima di procedere."}
-            {step === 3 && `Stai firmando digitalmente: ${documentType}.`}
+            {step === 3 && `Stai firmando digitalmente: ${sessionData?.template_name}.`}
           </p>
         </div>
 
@@ -383,10 +383,9 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
                   </div>
                 </div>
                 <div className="text-sm text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-white/[0.03] p-6 rounded-2xl max-h-40 overflow-y-auto mb-8 font-medium leading-relaxed shadow-inner custom-scrollbar">
-                  <p className="mb-3 font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-white/10 pb-2">{documentType}</p>
+                  <p className="mb-3 font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-white/10 pb-2">{sessionData?.template_name}</p>
                   <p>Firmando questo documento, io sottoscritto <b>{form.firstName} {form.lastName}</b>, nato il {form.birthDate}, 
                   con codice fiscale <b>{form.taxCode}</b>, in qualità di <b>{form.role}</b>, attesto la veridicità dei dati forniti e presto il mio consenso secondo quanto previsto dall'accordo quadro...</p>
-                  <p className="mt-4 text-[10px] text-slate-400 font-bold uppercase tracking-widest">ID Certificazione: DOC-{Math.random().toString(36).substr(2, 9).toUpperCase()}</p>
                 </div>
                 
                 <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-3 px-1">La tua Firma Autografa</label>
