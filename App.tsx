@@ -12,9 +12,10 @@ import {
 } from 'lucide-react';
 import { 
   DocStatus, TemplateType, AppState, Production, Person, Template, 
-  DocumentInstance, AppNotification, FieldMapping
+  DocumentInstance, AppNotification, FieldMapping, FormState
 } from './types';
 import SignatureCanvasComponent from './components/SignatureCanvas';
+import PublicForm from './components/PublicForm';
 
 // PDF-LIB Global (imported in index.html)
 declare const PDFLib: any;
@@ -282,6 +283,115 @@ const App: React.FC = () => {
       notifications: prev.notifications.filter(n => !(n.personId === personToDeleteId && n.productionId === selectedProdId))
     }));
     setPersonToDeleteId(null);
+  };
+
+  // --- PUBLIC SIGNING HUB ---
+  const SigningHub = () => {
+    const person = useMemo(() => data.people.find(p => p.hubToken === publicHubToken), [publicHubToken, data.people]);
+    
+    if (!person) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+          <div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border border-slate-100 max-w-sm text-center">
+            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertTriangle className="w-8 h-8" />
+            </div>
+            <h2 className="text-xl font-black text-slate-900">Accesso Negato</h2>
+            <p className="text-slate-500 mt-2 text-sm">Il link di firma non è valido o è scaduto. Contatta la produzione per un nuovo invito.</p>
+          </div>
+        </div>
+      );
+    }
+
+    const production = data.productions.find(p => p.id === person.productionId);
+    
+    // Find first available instance to sign for this person in this production
+    const instance = data.instances.find(i => 
+      i.personId === person.id && 
+      i.productionId === person.productionId && 
+      i.status !== DocStatus.SIGNED &&
+      (!activeDocId || i.id === activeDocId)
+    );
+
+    if (!instance) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+          <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100 max-w-md text-center">
+            <div className="w-20 h-20 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto mb-6">
+              <CheckCircle className="w-10 h-10" />
+            </div>
+            <h2 className="text-2xl font-black text-slate-900">Ottimo lavoro!</h2>
+            <p className="text-slate-500 mt-3">Hai completato tutti i documenti per <b>{production?.title}</b>. Riceverai una copia firmata non appena la produzione l'avrà archiviata.</p>
+          </div>
+        </div>
+      );
+    }
+
+    const template = data.templates.find(t => t.id === instance.templateId);
+
+    const handleComplete = async (formData: FormState) => {
+      if (!template) return;
+      
+      try {
+        // Map form data to template fields
+        // INITIAL_DATA fields are 'name', 'date', 'sig'
+        const mappedData: Record<string, string> = {
+          name: `${formData.firstName} ${formData.lastName}`,
+          date: new Date().toLocaleDateString(),
+          role: formData.role,
+          idNumber: formData.idNumber,
+          birthDate: formData.birthDate
+        };
+
+        const { url, hash } = await generateSignedPdf(template, mappedData, formData.signature);
+        
+        const now = new Date().toISOString();
+        const audit = {
+          signedAt: now,
+          typedName: `${formData.firstName} ${formData.lastName}`,
+          userAgent: navigator.userAgent,
+          pdfHash: hash,
+          ip: 'protected'
+        };
+
+        setData(prev => {
+          const newNotif: AppNotification = {
+            id: 'n-' + Date.now(),
+            productionId: person.productionId,
+            personId: person.id,
+            documentInstanceId: instance.id,
+            type: 'DOCUMENT_SIGNED',
+            title: 'Documento Firmato',
+            message: `${person.name} ha firmato "${template.name}"`,
+            createdAt: now,
+            readAt: null
+          };
+
+          return {
+            ...prev,
+            instances: prev.instances.map(i => i.id === instance.id ? {
+              ...i,
+              status: DocStatus.SIGNED,
+              signedAt: now,
+              finalPdfUrl: url,
+              auditJSON: JSON.stringify(audit)
+            } : i),
+            notifications: [newNotif, ...prev.notifications]
+          };
+        });
+      } catch (err) {
+        console.error("Signing Error:", err);
+        alert("Si è verificato un errore durante la firma. Riprova.");
+      }
+    };
+
+    return (
+      <PublicForm 
+        documentType={template?.name || 'Documento'} 
+        recipientName={person.name} 
+        onComplete={handleComplete} 
+      />
+    );
   };
 
   // --- MODALS & TOOLS ---
@@ -633,7 +743,6 @@ const App: React.FC = () => {
   const NotificationsPanel = () => (
     <>
       <div className={`fixed inset-0 bg-slate-950/40 backdrop-blur-[2px] z-[60] transition-opacity ${isNotificationsOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={() => setIsNotificationsOpen(false)} />
-      {/* Fixed: Added missing quotes to Tailwind classes in the ternary expression to avoid a hard syntax error that broke component scope */}
       <div className={`fixed top-0 right-0 z-[70] w-full max-sm bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-white/5 h-screen transition-transform duration-300 ${isNotificationsOpen ? 'translate-x-0 shadow-2xl' : 'translate-x-full'}`}>
         <div className="p-6 flex flex-col h-full">
           <div className="flex items-center justify-between mb-8">
@@ -854,7 +963,7 @@ const App: React.FC = () => {
 
     return (
       <div className="space-y-8 animate-fade-in">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between w-full">
           <div className="w-full">
             <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">Libreria Template</h2>
             <p className="text-slate-500 dark:text-slate-500 text-sm mt-1">Modelli globali pronti per la firma.</p>
@@ -969,19 +1078,19 @@ const App: React.FC = () => {
     return (
       <div className="space-y-8 animate-fade-in w-full">
         {/* Header Section */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 w-full">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between w-full">
            <div className="w-full">
               <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">Cast & Crew</h2>
               <p className="text-slate-500 text-sm mt-1">Gestisci i membri del progetto corrente.</p>
            </div>
-           <div className="grid grid-cols-1 sm:flex sm:flex-row gap-2 w-full sm:w-auto">
-              <button onClick={() => setIsImportModalOpen(true)} className="w-full sm:w-auto px-4 py-3 bg-slate-100 dark:bg-white/5 rounded-2xl text-slate-600 dark:text-slate-300 font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 text-sm sm:text-base">
+           <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:gap-3">
+              <button onClick={() => setIsImportModalOpen(true)} className="col-span-2 sm:col-span-1 px-4 py-3 bg-slate-100 dark:bg-white/5 rounded-2xl text-slate-600 dark:text-slate-300 font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 text-sm sm:text-base">
                 <FileSpreadsheet className="w-5 h-5 flex-shrink-0" /> Importa
               </button>
-              <button onClick={() => setIsBulkSendOpen(true)} className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-green-600/20 hover:bg-green-700 transition-all active:scale-95 text-sm sm:text-base">
+              <button onClick={() => setIsBulkSendOpen(true)} className="col-span-1 px-4 py-3 bg-green-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-green-600/20 hover:bg-green-700 transition-all active:scale-95 text-sm sm:text-base">
                 <Send className="w-5 h-5 flex-shrink-0" /> Invia richieste
               </button>
-              <button onClick={() => setIsAddModalOpen(true)} className="w-full sm:w-auto px-4 py-3 bg-indigo-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95 text-sm sm:text-base">
+              <button onClick={() => setIsAddModalOpen(true)} className="col-span-1 px-4 py-3 bg-indigo-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95 text-sm sm:text-base">
                 <Plus className="w-5 h-5 flex-shrink-0" /> Nuovo Membro
               </button>
            </div>
@@ -1253,11 +1362,9 @@ const App: React.FC = () => {
 
     return (
       <div className="space-y-8 animate-fade-in">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">Archivio (Firmati)</h2>
-            <p className="text-slate-500 text-sm mt-1">Sfoglia i documenti completati e certificati.</p>
-          </div>
+        <div className="flex flex-col gap-1 w-full">
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">Archivio (Firmati)</h2>
+            <p className="text-slate-500 text-sm">Sfoglia i documenti completati e certificati.</p>
         </div>
         <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-[2.5rem] overflow-hidden shadow-sm">
            <div className="overflow-x-auto custom-scrollbar">
@@ -1330,9 +1437,9 @@ const App: React.FC = () => {
     
     return (
       <div className="space-y-8 animate-fade-in">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between w-full">
           <div className="w-full">
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">In Attesa</h2>
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">In Attesa</h2>
             <p className="text-slate-500 text-sm mt-1">Documenti assegnati ma non ancora firmati.</p>
           </div>
           <button 
@@ -1378,9 +1485,9 @@ const App: React.FC = () => {
 
   const ProductionsContent = () => (
     <div className="space-y-8 animate-fade-in">
-       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-          <div>
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">I Miei Progetti</h2>
+       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between w-full">
+          <div className="w-full">
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">I Miei Progetti</h2>
             <p className="text-slate-500 text-sm mt-1">Gestisci tutte le tue produzioni attive.</p>
           </div>
           <button onClick={() => setIsNewProdModalOpen(true)} className="w-full sm:w-auto px-6 py-4 bg-indigo-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95 text-sm sm:text-base"><Plus className="w-5 h-5" /> Nuovo Progetto</button>
@@ -1391,4 +1498,123 @@ const App: React.FC = () => {
                <div className={`p-3 rounded-2xl mb-4 inline-block ${selectedProdId === p.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-400 dark:text-slate-500 group-hover:bg-indigo-600/10 group-hover:text-indigo-600'}`}>
                   < Clapperboard className="w-6 h-6" />
                </div>
-               <h3 className="text-xl font-bold text-slate-900 dark:text-white
+               <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">{p.title}</h3>
+               <p className="text-xs text-slate-500 font-medium line-clamp-2 mb-4">{p.notes || 'Nessuna descrizione.'}</p>
+               <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-white/5">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(p.createdAt).toLocaleDateString()}</span>
+                  <ChevronRight className={`w-4 h-4 ${selectedProdId === p.id ? 'text-indigo-600' : 'text-slate-300'}`} />
+               </div>
+            </div>
+          ))}
+       </div>
+    </div>
+  );
+
+  if (publicHubToken) return <SigningHub />;
+
+  const personToDelete = data.people.find(p => p.id === personToDeleteId);
+  const personSignedCount = data.instances.filter(i => i.personId === personToDeleteId && i.status === DocStatus.SIGNED).length;
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex overflow-hidden transition-all duration-300">
+      <Sidebar />
+      <div className="flex-1 flex flex-col h-screen overflow-y-auto custom-scrollbar lg:pl-[280px] w-full">
+        <Header />
+        <main className="p-4 sm:p-8 pb-24 max-w-6xl mx-auto w-full">
+          {activeTab === 'DASHBOARD' && <DashboardContent />}
+          {activeTab === 'PEOPLE' && <PeopleContent />}
+          {activeTab === 'ARCHIVE' && <ArchiveContent />}
+          {activeTab === 'PENDING' && <PendingContent />}
+          {activeTab === 'TEMPLATES' && <TemplateContent />}
+          {activeTab === 'PRODUCTIONS' && <ProductionsContent />}
+        </main>
+      </div>
+      <NotificationsPanel />
+      <BulkSendModal type="INIT" />
+      <BulkSendModal type="REMIND" />
+      <ReminderPreviewModal />
+      <ImportCastModal />
+      <PdfMapperTool />
+      
+      {/* Existing Modals Updated */}
+      {isNewProdModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl border border-slate-200 dark:border-white/10 shadow-2xl p-6 sm:p-8 transition-all">
+            <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-6">Nuovo Progetto</h3>
+            <div className="space-y-4">
+              <input value={newProdData.title} onChange={e => setNewProdData({...newProdData, title: e.target.value})} type="text" className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none" placeholder="Titolo Film" />
+              <input value={newProdData.phone} onChange={e => setNewProdData({...newProdData, phone: e.target.value})} type="text" className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none" placeholder="WhatsApp Produzione (per assistenza)" />
+              <textarea value={newProdData.notes} onChange={e => setNewProdData({...newProdData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none h-24" placeholder="Note..." />
+              <button onClick={handleCreateProduction} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/20 active:scale-95 transition-all">Crea Produzione</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isRenameModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl border border-slate-200 dark:border-white/10 shadow-2xl p-6 sm:p-8">
+            <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-6">Gestione Progetto</h3>
+            <div className="space-y-4">
+              <input value={renameValue} onChange={e => setRenameValue(e.target.value)} type="text" className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none" placeholder="Titolo" />
+              <input value={renamePhone} onChange={e => setRenamePhone(e.target.value)} type="text" className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none" placeholder="WhatsApp Produzione" />
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button onClick={() => setIsRenameModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-500 font-black rounded-2xl order-2 sm:order-1">Annulla</button>
+                <button onClick={handleUpdateProduction} className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl order-1 sm:order-2">Salva</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {templateToDeleteId && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-slate-200 dark:border-white/10 shadow-2xl p-8 transition-all relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-2 bg-red-500" />
+            <div className="flex flex-col items-center text-center">
+              <div className="w-20 h-20 bg-red-500/10 text-red-600 rounded-full flex items-center justify-center mb-6 shadow-lg"><AlertTriangle className="w-10 h-10" /></div>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Eliminare template?</h3>
+              <p className="text-slate-500 text-sm mb-6">Vuoi eliminare definitivamente <b>{data.templates.find(t => t.id === templateToDeleteId)?.name}</b>? L'azione non è annullabile.</p>
+              <div className="flex flex-col sm:flex-row w-full gap-3 sm:gap-4">
+                <button onClick={() => setTemplateToDeleteId(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 font-black rounded-2xl order-2 sm:order-1">Annulla</button>
+                <button onClick={confirmDeleteTemplate} className="flex-1 py-4 bg-red-600 text-white font-black rounded-2xl shadow-xl shadow-red-600/20 order-1 sm:order-2">Elimina</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {personToDeleteId && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-slate-200 dark:border-white/10 shadow-2xl p-8 transition-all relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-2 bg-red-500" />
+            <div className="flex flex-col items-center text-center">
+              <div className="w-20 h-20 bg-red-500/10 text-red-600 rounded-full flex items-center justify-center mb-6 shadow-lg"><UserMinus className="w-10 h-10" /></div>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Eliminare membro?</h3>
+              <p className="text-slate-500 text-sm mb-6 leading-relaxed">
+                Vuoi eliminare <b>{personToDelete?.name}</b> dalla produzione <b>{activeProduction?.title}</b>? 
+                Questa azione eliminerà anche i documenti assegnati a questa persona.
+              </p>
+              
+              {personSignedCount > 0 && (
+                <div className="w-full p-4 mb-6 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-2xl text-left flex gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                  <p className="text-[10px] text-amber-700 dark:text-amber-500 font-bold">
+                    ATTENZIONE: Verranno rimossi anche i <b>{personSignedCount} PDF firmati</b> archiviati per questa persona.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row w-full gap-3 sm:gap-4">
+                <button onClick={() => setPersonToDeleteId(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 font-black rounded-2xl order-2 sm:order-1">Annulla</button>
+                <button onClick={confirmDeletePerson} className="flex-1 py-4 bg-red-600 text-white font-black rounded-2xl shadow-xl shadow-red-600/20 order-1 sm:order-2">Elimina</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
