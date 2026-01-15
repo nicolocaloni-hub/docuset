@@ -26,10 +26,10 @@ const STORAGE_KEY = 'setdocs_app_data_v4';
 const THEME_KEY = 'setdocs_theme';
 const REMOTE_VAULT_KEY = 'setdocs_remote_vault';
 
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL || '',
-  process.env.VITE_SUPABASE_ANON_KEY || ''
-);
+// Safely initialize Supabase client
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 const SignatureCanvas = ({ onSave, onClear }: { onSave: (data: string) => void; onClear: () => void }) => (
   <SignatureCanvasComponent onSave={onSave} onClear={onClear} />
@@ -273,7 +273,7 @@ const App: React.FC = () => {
 
   // --- REALTIME NOTIFICATIONS HOOK ---
   useEffect(() => {
-    if (!selectedProdId) return;
+    if (!selectedProdId || !supabase) return;
 
     const channel = supabase
       .channel(`public_forms_${selectedProdId}`)

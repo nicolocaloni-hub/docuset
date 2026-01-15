@@ -15,10 +15,10 @@ import { extractDocumentData } from '../services/gemini';
 import { FormState } from '../types';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL || '',
-  process.env.VITE_SUPABASE_ANON_KEY || ''
-);
+// Safely initialize Supabase client
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 interface PublicFormProps {
   documentType: string;
@@ -76,19 +76,21 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
 
   const saveToRemoteVault = async (finalForm: FormState) => {
     // 1. Supabase push
-    try {
-      await supabase
-        .from('public_forms')
-        .update({
-          status: 'SUBMITTED',
-          formData: finalForm,
-          signatureDataUrl: finalForm.signature,
-          submittedAt: new Date().toISOString(),
-          userAgent: navigator.userAgent
-        })
-        .eq('token', hubToken);
-    } catch (err) {
-      console.warn("Supabase push failed, relying on local fallback", err);
+    if (supabase) {
+      try {
+        await supabase
+          .from('public_forms')
+          .update({
+            status: 'SUBMITTED',
+            formData: finalForm,
+            signatureDataUrl: finalForm.signature,
+            submittedAt: new Date().toISOString(),
+            userAgent: navigator.userAgent
+          })
+          .eq('token', hubToken);
+      } catch (err) {
+        console.warn("Supabase push failed, relying on local fallback", err);
+      }
     }
 
     // 2. Local Fallback (for offline or same-browser demo)
