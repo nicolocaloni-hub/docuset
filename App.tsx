@@ -8,7 +8,7 @@ import {
   ArrowRight, Archive, Inbox, ChevronUp, BellOff, Eye, Search as SearchIcon,
   FileIcon, FileUp, Info, Moon, Sun, Copy, ClipboardCheck, Phone, Layout,
   Share2, ArrowLeft, ExternalLink, Edit2, AlertTriangle, FileSpreadsheet,
-  MousePointer2, History, Shield, FileQuestion, Mail, StickyNote
+  MousePointer2, History, Shield, FileQuestion, Mail, StickyNote, UserMinus
 } from 'lucide-react';
 import { 
   DocStatus, TemplateType, AppState, Production, Person, Template, 
@@ -167,6 +167,7 @@ const App: React.FC = () => {
   // Delete State
   const [templateToDeleteId, setTemplateToDeleteId] = useState<string | null>(null);
   const [templateToMapId, setTemplateToMapId] = useState<string | null>(null);
+  const [personToDeleteId, setPersonToDeleteId] = useState<string | null>(null);
 
   // Router-like state for public views
   const [publicHubToken, setPublicHubToken] = useState<string | null>(null);
@@ -269,6 +270,18 @@ const App: React.FC = () => {
       templates: prev.templates.filter(t => t.id !== templateToDeleteId)
     }));
     setTemplateToDeleteId(null);
+  };
+
+  const confirmDeletePerson = () => {
+    if (!personToDeleteId || !selectedProdId) return;
+    
+    setData(prev => ({
+      ...prev,
+      people: prev.people.filter(p => p.id !== personToDeleteId),
+      instances: prev.instances.filter(i => !(i.personId === personToDeleteId && i.productionId === selectedProdId)),
+      notifications: prev.notifications.filter(n => !(n.personId === personToDeleteId && n.productionId === selectedProdId))
+    }));
+    setPersonToDeleteId(null);
   };
 
   // --- MODALS & TOOLS ---
@@ -656,7 +669,7 @@ const App: React.FC = () => {
             { label: 'Firmati', value: prodInstances.filter(i => i.status === DocStatus.SIGNED).length, icon: CheckCircle, color: 'text-green-500', bg: 'bg-green-500/10', tab: 'ARCHIVE' },
             { label: 'In Attesa', value: prodInstances.filter(i => i.status !== DocStatus.SIGNED).length, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10', tab: 'PENDING' },
           ].map((s, i) => (
-            <div key={i} onClick={() => setActiveTab(s.tab as any)} className="bg-white dark:bg-white/5 p-6 rounded-3xl border border-slate-200 dark:border-white/10 shadow-sm transition-all hover:shadow-md hover:border-indigo-500/30 cursor-pointer group">
+            <div key={i} onClick={() => setActiveTab(s.tab as any)} className="bg-white p-6 dark:bg-white/5 rounded-3xl border border-slate-200 dark:border-white/10 shadow-sm transition-all hover:shadow-md hover:border-indigo-500/30 cursor-pointer group">
                <div className={`${s.bg} w-12 h-12 rounded-2xl flex items-center justify-center mb-4 ${s.color} transition-transform group-hover:scale-110`}>
                   <s.icon className="w-6 h-6" />
                </div>
@@ -1007,11 +1020,12 @@ const App: React.FC = () => {
                               </div>
                            </td>
                            <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-2">
+                              <div className="flex items-center justify-end gap-1">
                                 {hasSentButNotSigned && (
                                   <button onClick={() => window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ehi ${p.name}, piccolo promemoria: ti chiedo di completare i documenti qui: ${getPublicLink(p)}`)}`, '_blank')} className="p-2.5 bg-amber-500/10 text-amber-600 rounded-xl hover:bg-amber-500 hover:text-white transition-all shadow-sm" title="Sollecita"><Clock className="w-4 h-4" /></button>
                                 )}
-                                <button onClick={() => window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ecco il link per firmare i documenti: ${getPublicLink(p)}`)}`, '_blank')} className="p-2.5 bg-green-500/10 text-green-600 rounded-xl hover:bg-green-500 hover:text-white transition-all shadow-sm"><Share2 className="w-4 h-4" /></button>
+                                <button onClick={() => window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ecco il link per firmare i documenti: ${getPublicLink(p)}`)}`, '_blank')} className="p-2.5 bg-green-500/10 text-green-600 rounded-xl hover:bg-green-500 hover:text-white transition-all shadow-sm" title="Invia Link"><Share2 className="w-4 h-4" /></button>
+                                <button onClick={() => setPersonToDeleteId(p.id)} className="p-2.5 bg-red-500/10 text-red-600 rounded-xl hover:bg-red-600 hover:text-white transition-all shadow-sm" title="Elimina membro"><Trash2 className="w-4 h-4" /></button>
                               </div>
                            </td>
                         </tr>
@@ -1284,7 +1298,7 @@ const App: React.FC = () => {
           {data.productions.map(p => (
             <div key={p.id} onClick={() => { setSelectedProdId(p.id); setActiveTab('DASHBOARD'); }} className={`bg-white dark:bg-white/5 p-6 rounded-[2.5rem] border transition-all shadow-sm cursor-pointer group hover:shadow-md ${selectedProdId === p.id ? 'border-indigo-600 shadow-indigo-600/10 ring-1 ring-indigo-500/50' : 'border-slate-200 dark:border-white/10'}`}>
                <div className={`p-3 rounded-2xl mb-4 inline-block ${selectedProdId === p.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-400 dark:text-slate-500 group-hover:bg-indigo-600/10 group-hover:text-indigo-600'}`}>
-                  <Clapperboard className="w-6 h-6" />
+                  < Clapperboard className="w-6 h-6" />
                </div>
                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">{p.title}</h3>
                <p className="text-xs text-slate-500 font-medium line-clamp-2 mb-4">{p.notes || 'Nessuna descrizione.'}</p>
@@ -1510,6 +1524,9 @@ const App: React.FC = () => {
 
   if (publicHubToken) return <SigningHub />;
 
+  const personToDelete = data.people.find(p => p.id === personToDeleteId);
+  const personSignedCount = data.instances.filter(i => i.personId === personToDeleteId && i.status === DocStatus.SIGNED).length;
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex overflow-hidden transition-all duration-300">
       <Sidebar />
@@ -1573,6 +1590,36 @@ const App: React.FC = () => {
               <div className="flex w-full gap-4">
                 <button onClick={() => setTemplateToDeleteId(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 font-black rounded-2xl">Annulla</button>
                 <button onClick={confirmDeleteTemplate} className="flex-1 py-4 bg-red-600 text-white font-black rounded-2xl shadow-xl shadow-red-600/20">Elimina</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {personToDeleteId && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-slate-200 dark:border-white/10 shadow-2xl p-8 transition-all relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-2 bg-red-500" />
+            <div className="flex flex-col items-center text-center">
+              <div className="w-20 h-20 bg-red-500/10 text-red-600 rounded-full flex items-center justify-center mb-6 shadow-lg"><UserMinus className="w-10 h-10" /></div>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Eliminare membro?</h3>
+              <p className="text-slate-500 text-sm mb-6">
+                Vuoi eliminare <b>{personToDelete?.name}</b> dalla produzione <b>{activeProduction?.title}</b>? 
+                Questa azione eliminerà anche i documenti assegnati a questa persona.
+              </p>
+              
+              {personSignedCount > 0 && (
+                <div className="w-full p-4 mb-6 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-2xl text-left flex gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                  <p className="text-[10px] text-amber-700 dark:text-amber-500 font-bold">
+                    ATTENZIONE: Verranno rimossi anche i <b>{personSignedCount} PDF firmati</b> archiviati per questa persona.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex w-full gap-4">
+                <button onClick={() => setPersonToDeleteId(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 font-black rounded-2xl">Annulla</button>
+                <button onClick={confirmDeletePerson} className="flex-1 py-4 bg-red-600 text-white font-black rounded-2xl shadow-xl shadow-red-600/20">Elimina</button>
               </div>
             </div>
           </div>
