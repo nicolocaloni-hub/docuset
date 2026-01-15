@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Camera, 
   Upload, 
@@ -12,13 +12,13 @@ import {
 } from 'lucide-react';
 import SignatureCanvas from './SignatureCanvas';
 import { extractDocumentData } from '../services/gemini';
-import { FormState } from '../types';
+import { FormState, DocStatus } from '../types';
 import { createClient } from '@supabase/supabase-js';
 
 // Safely initialize Supabase client
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 interface PublicFormProps {
   documentType: string;
@@ -33,8 +33,10 @@ const REMOTE_VAULT_KEY = 'setdocs_remote_vault';
 const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hubToken, instanceId, onComplete }) => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [isValidating, setIsValidating] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({
     firstName: recipientName.split(' ')[0] || '',
     lastName: recipientName.split(' ').slice(1).join(' ') || '',
@@ -44,6 +46,48 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
     idNumber: '',
     signature: '',
   });
+
+  useEffect(() => {
+    const validateToken = async () => {
+      if (!supabase) {
+        setIsValidating(false);
+        return;
+      }
+
+      try {
+        const { data: request, error: fetchError } = await supabase
+          .from('sign_requests')
+          .select('*')
+          .eq('token', hubToken)
+          .single();
+
+        if (fetchError || !request) {
+          setValidationError("Link non valido o scaduto.");
+        } else if (request.status === 'SIGNED') {
+          setValidationError("Documento già firmato.");
+        } else if (request.expires_at && new Date(request.expires_at) < new Date()) {
+          setValidationError("Link scaduto.");
+        } else {
+          // Mark as opened if not already opened
+          if (request.status === 'SENT' || request.status === 'NON INVIATO') {
+            await supabase
+              .from('sign_requests')
+              .update({ 
+                status: 'APERTO', 
+                opened_at: new Date().toISOString() 
+              })
+              .eq('token', hubToken);
+          }
+        }
+      } catch (err) {
+        console.error("Token validation error:", err);
+      } finally {
+        setIsValidating(false);
+      }
+    };
+
+    validateToken();
+  }, [hubToken]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -75,25 +119,36 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
   };
 
   const saveToRemoteVault = async (finalForm: FormState) => {
-    // 1. Supabase push
+    // 1. Supabase update
     if (supabase) {
       try {
-        await supabase
-          .from('public_forms')
-          .update({
-            status: 'SUBMITTED',
-            formData: finalForm,
-            signatureDataUrl: finalForm.signature,
-            submittedAt: new Date().toISOString(),
-            userAgent: navigator.userAgent
-          })
-          .eq('token', hubToken);
+        // Update both tables for backward compatibility and tracking
+        await Promise.all([
+          supabase
+            .from('public_forms')
+            .upsert({
+              token: hubToken,
+              status: 'SUBMITTED',
+              formData: finalForm,
+              signatureDataUrl: finalForm.signature,
+              submittedAt: new Date().toISOString(),
+              userAgent: navigator.userAgent
+            }, { onConflict: 'token' }),
+          
+          supabase
+            .from('sign_requests')
+            .update({
+              status: 'FIRMATO',
+              signed_at: new Date().toISOString()
+            })
+            .eq('token', hubToken)
+        ]);
       } catch (err) {
         console.warn("Supabase push failed, relying on local fallback", err);
       }
     }
 
-    // 2. Local Fallback (for offline or same-browser demo)
+    // 2. Local Fallback
     const vault = JSON.parse(localStorage.getItem(REMOTE_VAULT_KEY) || '[]');
     const submission = {
       hubToken,
@@ -119,6 +174,26 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hu
       setIsSubmitting(false);
     }
   };
+
+  if (isValidating) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+      </div>
+    );
+  }
+
+  if (validationError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-6">
+        <div className="bg-white dark:bg-slate-900 p-10 rounded-[3rem] border border-slate-200 dark:border-white/10 shadow-2xl text-center max-w-sm">
+           <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-6" />
+           <h2 className="text-2xl font-black mb-2">{validationError}</h2>
+           <p className="text-slate-500 font-medium">Contatta la produzione per ricevere un nuovo link di firma.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col transition-colors duration-300">

@@ -29,7 +29,7 @@ const REMOTE_VAULT_KEY = 'setdocs_remote_vault';
 // Safely initialize Supabase client
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 const SignatureCanvas = ({ onSave, onClear }: { onSave: (data: string) => void; onClear: () => void }) => (
   <SignatureCanvasComponent onSave={onSave} onClear={onClear} />
@@ -186,17 +186,27 @@ const App: React.FC = () => {
   const [publicFormToken, setPublicFormToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const handleHash = () => {
+    const handleRoute = () => {
+      const path = window.location.pathname;
       const hash = window.location.hash;
-      if (hash.startsWith('#/form/')) {
+      
+      // Handle both /sign/hub/TOKEN and #/form/TOKEN
+      if (path.includes('/sign/hub/')) {
+        const parts = path.split('/sign/hub/');
+        setPublicFormToken(parts[parts.length - 1] || null);
+      } else if (hash.startsWith('#/form/')) {
         setPublicFormToken(hash.split('/')[2] || null);
       } else {
         setPublicFormToken(null);
       }
     };
-    handleHash();
-    window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
+    handleRoute();
+    window.addEventListener('hashchange', handleRoute);
+    window.addEventListener('popstate', handleRoute);
+    return () => {
+      window.removeEventListener('hashchange', handleRoute);
+      window.removeEventListener('popstate', handleRoute);
+    };
   }, []);
 
   useEffect(() => {
@@ -309,7 +319,6 @@ const App: React.FC = () => {
                 notifications: [newNotif, ...prev.notifications]
               }));
               
-              // Trigger auto-sync to generate the PDF immediately
               syncSubmissions();
             }
           }
@@ -399,7 +408,11 @@ const App: React.FC = () => {
     }));
   };
 
-  const getPublicLink = (person: Person) => `${window.location.origin}${window.location.pathname}#/form/${person.hubToken}`;
+  const getPublicLink = (person: Person) => {
+    const origin = window.location.origin;
+    const path = window.location.pathname.replace(/\/$/, '');
+    return `${origin}${path}/#/form/${person.hubToken}`;
+  };
 
   const confirmDeleteTemplate = () => {
     if (!templateToDeleteId) return;
@@ -731,7 +744,19 @@ const App: React.FC = () => {
                     <td className="px-8 py-6 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button 
-                          onClick={() => window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ti ho inviato i documenti da firmare per ${activeProduction?.title}. Puoi accedere qui: ${getPublicLink(p)}`)}`, '_blank')}
+                          onClick={async () => {
+                            if (supabase) {
+                              // Track the request in Supabase before opening WA
+                              await supabase.from('sign_requests').upsert({
+                                token: p.hubToken,
+                                production_id: selectedProdId,
+                                person_id: p.id,
+                                status: DocStatus.SENT,
+                                created_at: new Date().toISOString()
+                              }, { onConflict: 'token' });
+                            }
+                            window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ti ho inviato i documenti da firmare per ${activeProduction?.title}. Puoi accedere qui: ${getPublicLink(p)}`)}`, '_blank');
+                          }}
                           className="p-2.5 text-slate-400 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10 rounded-xl transition-all"
                           title="Invia link via WhatsApp"
                         >
@@ -837,7 +862,20 @@ const App: React.FC = () => {
                     <td className="px-8 py-6 text-sm text-slate-500">{t?.name}</td>
                     <td className="px-8 py-6"><span className="px-2 py-1 bg-amber-100 text-amber-700 rounded text-[10px] font-bold">{inst.status}</span></td>
                     <td className="px-8 py-6 text-right">
-                       <button onClick={() => { if(p) window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ti ricordo di firmare il documento: ${getPublicLink(p)}`)}`, '_blank') }} className="p-2 text-green-500 hover:text-green-700 transition-all"><Send className="w-5 h-5" /></button>
+                       <button onClick={async () => { 
+                         if(p) {
+                           if (supabase) {
+                             await supabase.from('sign_requests').upsert({
+                               token: p.hubToken,
+                               production_id: selectedProdId,
+                               person_id: p.id,
+                               status: DocStatus.SENT,
+                               created_at: new Date().toISOString()
+                             }, { onConflict: 'token' });
+                           }
+                           window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ti ricordo di firmare il documento: ${getPublicLink(p)}`)}`, '_blank');
+                         }
+                       }} className="p-2 text-green-500 hover:text-green-700 transition-all"><Send className="w-5 h-5" /></button>
                        <button onClick={() => deleteInstance(inst.id)} className="p-2 text-slate-400 hover:text-red-500 transition-all"><Trash2 className="w-4 h-4" /></button>
                     </td>
                   </tr>
@@ -897,10 +935,13 @@ const App: React.FC = () => {
 
   const PublicView = () => {
     const person = useMemo(() => data.people.find(p => p.hubToken === publicFormToken), [publicFormToken, data.people]);
-    if (!person) return <div className="min-h-screen flex items-center justify-center p-6 text-slate-500 font-bold uppercase">Token non valido</div>;
+    if (!person) return <div className="min-h-screen flex items-center justify-center p-6 text-slate-500 font-bold uppercase">Token non trovato localmente. Verifica la connessione.</div>;
     const instance = data.instances.find(i => i.personId === person.id && i.status !== DocStatus.SIGNED);
     const template = instance ? data.templates.find(t => t.id === instance.templateId) : null;
-    if (!instance || !template) return <div className="min-h-screen flex items-center justify-center p-6 text-green-500 font-bold uppercase">Tutto firmato!</div>;
+    
+    // Fallback if no instance found but we have a token
+    if (!instance || !template) return <div className="min-h-screen flex items-center justify-center p-6 text-green-500 font-bold uppercase">Tutto firmato o sessione non trovata!</div>;
+    
     return <PublicForm documentType={template.name} recipientName={person.name} hubToken={person.hubToken} instanceId={instance.id} onComplete={syncSubmissions} />;
   };
 
@@ -973,8 +1014,18 @@ const App: React.FC = () => {
       
     const isAlreadyActioned = targetInstances.length === 0;
 
-    const handleOpenWA = () => {
+    const handleOpenWA = async () => {
       const link = getPublicLink(currentPerson);
+      if (supabase) {
+        // Track the request in Supabase
+        await supabase.from('sign_requests').upsert({
+          token: currentPerson.hubToken,
+          production_id: selectedProdId,
+          person_id: currentPerson.id,
+          status: DocStatus.SENT,
+          created_at: new Date().toISOString()
+        }, { onConflict: 'token' });
+      }
       const message = type === 'INIT' 
         ? `Ciao ${currentPerson.name}, ti ho inviato i documenti da firmare per ${activeProduction?.title}. Puoi accedere qui: ${link}`
         : `Ciao ${currentPerson.name}, ti ricordo di firmare i documenti per ${activeProduction?.title}. Puoi accedere qui: ${link}`;
@@ -1267,7 +1318,7 @@ const App: React.FC = () => {
 
       {templateToDeleteId && (
         <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[3rem] border border-slate-200 dark:border-white/10 shadow-2xl p-10 transition-all relative overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 w-full max-md rounded-[3rem] border border-slate-200 dark:border-white/10 shadow-2xl p-10 transition-all relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-3 bg-red-500" />
             <div className="flex flex-col items-center text-center">
               <div className="w-24 h-24 bg-red-500/10 text-red-600 rounded-full flex items-center justify-center mb-8 shadow-sm"><AlertTriangle className="w-12 h-12" /></div>
