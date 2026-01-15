@@ -633,6 +633,7 @@ const App: React.FC = () => {
   const NotificationsPanel = () => (
     <>
       <div className={`fixed inset-0 bg-slate-950/40 backdrop-blur-[2px] z-[60] transition-opacity ${isNotificationsOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={() => setIsNotificationsOpen(false)} />
+      {/* Fixed: Added missing quotes to Tailwind classes in the ternary expression to avoid a hard syntax error that broke component scope */}
       <div className={`fixed top-0 right-0 z-[70] w-full max-sm bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-white/5 h-screen transition-transform duration-300 ${isNotificationsOpen ? 'translate-x-0 shadow-2xl' : 'translate-x-full'}`}>
         <div className="p-6 flex flex-col h-full">
           <div className="flex items-center justify-between mb-8">
@@ -853,12 +854,12 @@ const App: React.FC = () => {
 
     return (
       <div className="space-y-8 animate-fade-in">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-2xl font-black text-slate-900 dark:text-white">Libreria Template</h2>
-            <p className="text-slate-500 dark:text-slate-500 text-sm">Modelli globali pronti per la firma.</p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+          <div className="w-full">
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">Libreria Template</h2>
+            <p className="text-slate-500 dark:text-slate-500 text-sm mt-1">Modelli globali pronti per la firma.</p>
           </div>
-          <button onClick={() => fileInputRef.current?.click()} className="px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold flex items-center gap-2 shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95">
+          <button onClick={() => fileInputRef.current?.click()} className="w-full sm:w-auto px-6 py-4 bg-indigo-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95 text-sm sm:text-base">
             {uploading ? <Loader className="animate-spin" /> : <Plus className="w-5 h-5" />} Nuovo Template
           </button>
           <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.docx" onChange={handleUpload} />
@@ -896,7 +897,7 @@ const App: React.FC = () => {
           <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl">
              <div className="bg-white dark:bg-slate-900 w-full h-full max-w-5xl rounded-[3rem] border border-slate-200 dark:border-white/10 overflow-hidden flex flex-col shadow-2xl">
                 <div className="p-6 border-b border-slate-100 dark:border-white/10 flex justify-between items-center">
-                   <h3 className="font-bold text-slate-900 dark:text-white">{activePreview.name}</h3>
+                   <h3 className="font-bold text-slate-900 dark:text-white truncate pr-4">{activePreview.name}</h3>
                    <button onClick={() => setPreviewId(null)} className="p-2 text-slate-500 hover:text-slate-900"><X className="w-6 h-6" /></button>
                 </div>
                 <div className="flex-1 overflow-hidden">
@@ -966,22 +967,93 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="space-y-8 animate-fade-in">
-        <div className="flex justify-between items-center">
-           <div>
-              <h2 className="text-2xl font-black text-slate-900 dark:text-white">Cast & Crew</h2>
-              <p className="text-slate-500 text-sm">Gestisci i membri del progetto corrente.</p>
+      <div className="space-y-8 animate-fade-in w-full">
+        {/* Header Section */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 w-full">
+           <div className="w-full">
+              <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">Cast & Crew</h2>
+              <p className="text-slate-500 text-sm mt-1">Gestisci i membri del progetto corrente.</p>
            </div>
-           <div className="flex gap-3">
-              <button onClick={() => setIsImportModalOpen(true)} className="px-4 py-3 bg-slate-100 dark:bg-white/5 rounded-2xl text-slate-600 dark:text-slate-300 font-bold hover:bg-slate-200 transition-all flex items-center gap-2"><FileSpreadsheet className="w-5 h-5" /> Importa</button>
-              <button onClick={() => setIsBulkSendOpen(true)} className="px-6 py-3 bg-green-600 text-white rounded-2xl font-bold flex items-center gap-2 shadow-xl shadow-green-600/20 hover:bg-green-700 transition-all active:scale-95"><Send className="w-5 h-5" /> Invia richieste</button>
-              <button onClick={() => setIsAddModalOpen(true)} className="px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold flex items-center gap-2 shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95"><Plus className="w-5 h-5" /> Nuovo Membro</button>
+           <div className="grid grid-cols-1 sm:flex sm:flex-row gap-2 w-full sm:w-auto">
+              <button onClick={() => setIsImportModalOpen(true)} className="w-full sm:w-auto px-4 py-3 bg-slate-100 dark:bg-white/5 rounded-2xl text-slate-600 dark:text-slate-300 font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 text-sm sm:text-base">
+                <FileSpreadsheet className="w-5 h-5 flex-shrink-0" /> Importa
+              </button>
+              <button onClick={() => setIsBulkSendOpen(true)} className="w-full sm:w-auto px-4 py-3 bg-green-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-green-600/20 hover:bg-green-700 transition-all active:scale-95 text-sm sm:text-base">
+                <Send className="w-5 h-5 flex-shrink-0" /> Invia richieste
+              </button>
+              <button onClick={() => setIsAddModalOpen(true)} className="w-full sm:w-auto px-4 py-3 bg-indigo-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95 text-sm sm:text-base">
+                <Plus className="w-5 h-5 flex-shrink-0" /> Nuovo Membro
+              </button>
            </div>
         </div>
 
-        <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-[2.5rem] overflow-hidden shadow-sm">
-           <div className="overflow-x-auto">
-              <table className="w-full text-left min-w-[600px]">
+        {/* Mobile View (Card List) */}
+        <div className="sm:hidden space-y-4">
+          {prodPeople.map(p => {
+            const instances = prodInstances.filter(i => i.personId === p.id);
+            const hasSentButNotSigned = instances.some(i => i.status === DocStatus.SENT);
+            return (
+              <div key={p.id} className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-[2rem] shadow-sm space-y-4">
+                <div className="flex justify-between items-start">
+                  <div className="min-w-0">
+                    <p className="font-black text-slate-900 dark:text-white text-base truncate">{p.name}</p>
+                    <p className="text-xs text-slate-500 font-medium">{p.whatsapp}</p>
+                  </div>
+                  <button onClick={() => setPersonToDeleteId(p.id)} className="p-2 text-red-500 bg-red-500/10 rounded-xl">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <span className="px-2 py-1 bg-slate-100 dark:bg-white/10 rounded text-[10px] font-black text-slate-500 uppercase">{p.role}</span>
+                  <span className="px-2 py-1 bg-indigo-600/10 rounded text-[10px] font-black text-indigo-600 uppercase">{p.department}</span>
+                </div>
+
+                <div className="pt-2">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Documenti</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {instances.map(i => {
+                      const t = data.templates.find(temp => temp.id === i.templateId);
+                      const isDocx = t?.fileName.toLowerCase().endsWith('.docx');
+                      return (
+                        <div key={i.id} className={`group relative px-2.5 py-1 rounded-lg text-[9px] font-black uppercase border flex items-center gap-1.5 ${i.status === DocStatus.SIGNED ? 'bg-green-500/10 text-green-600 border-green-500/20' : 'bg-slate-100 dark:bg-white/5 text-slate-500 border-slate-200 dark:border-white/10'}`}>
+                          {t?.name} {isDocx && <FileQuestion className="w-3 h-3 text-amber-500" />}
+                          <button onClick={() => deleteInstance(i.id)} className="text-red-500 ml-1">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    <button onClick={() => setAssigningId(p.id)} className="p-1.5 text-indigo-600 dark:text-indigo-400 border border-dashed border-indigo-600/30 rounded-lg">
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  {hasSentButNotSigned && (
+                    <button onClick={() => window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ehi ${p.name}, piccolo promemoria: ti chiedo di completare i documenti qui: ${getPublicLink(p)}`)}`, '_blank')} className="flex-1 py-3 bg-amber-500/10 text-amber-600 rounded-xl font-bold text-xs flex items-center justify-center gap-2">
+                      <Clock className="w-4 h-4" /> Sollecita
+                    </button>
+                  )}
+                  <button onClick={() => window.open(`https://wa.me/${p.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Ciao ${p.name}, ecco il link per firmare i documenti: ${getPublicLink(p)}`)}`, '_blank')} className="flex-1 py-3 bg-green-500/10 text-green-600 rounded-xl font-bold text-xs flex items-center justify-center gap-2">
+                    <Share2 className="w-4 h-4" /> Invia Link
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          {prodPeople.length === 0 && (
+            <div className="text-center py-10 bg-white dark:bg-white/5 rounded-3xl border border-dashed border-slate-200 dark:border-white/10">
+              <p className="text-slate-400 text-sm italic">Nessun membro trovato.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Desktop View (Table) */}
+        <div className="hidden sm:block bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-[2.5rem] overflow-hidden shadow-sm">
+           <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left min-w-[750px]">
                  <thead className="bg-slate-50 dark:bg-white/[0.02] text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-widest border-b border-slate-100 dark:border-white/10">
                     <tr>
                        <th className="px-6 py-4">Nome</th>
@@ -1031,6 +1103,11 @@ const App: React.FC = () => {
                         </tr>
                       );
                     })}
+                    {prodPeople.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="py-20 text-center text-slate-400 text-sm italic">Nessun membro trovato. Inizia aggiungendo il primo!</td>
+                      </tr>
+                    )}
                  </tbody>
               </table>
            </div>
@@ -1038,8 +1115,8 @@ const App: React.FC = () => {
 
         {isAddModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-            <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[2.5rem] border border-slate-200 dark:border-white/10 shadow-2xl p-10 transition-all max-h-[95vh] flex flex-col overflow-hidden">
-              <div className="flex justify-between items-center mb-8">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[2.5rem] border border-slate-200 dark:border-white/10 shadow-2xl p-6 sm:p-10 transition-all max-h-[95vh] flex flex-col overflow-hidden">
+              <div className="flex justify-between items-center mb-6 sm:mb-8">
                 <h3 className="text-2xl font-black text-slate-900 dark:text-white">Nuovo Membro</h3>
                 <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-red-500 transition-colors"><X className="w-6 h-6" /></button>
               </div>
@@ -1129,17 +1206,17 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <div className="pt-8 border-t border-slate-100 dark:border-white/5 mt-4 flex gap-4">
+              <div className="pt-6 sm:pt-8 border-t border-slate-100 dark:border-white/5 mt-4 flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <button 
                   onClick={() => setIsAddModalOpen(false)}
-                  className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 font-black rounded-2xl hover:bg-slate-200 dark:hover:bg-white/10 transition-all"
+                  className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 font-black rounded-2xl hover:bg-slate-200 dark:hover:bg-white/10 transition-all text-sm sm:text-base order-2 sm:order-1"
                 >
                   Annulla
                 </button>
                 <button 
                   onClick={handleAddPerson}
                   disabled={!newPerson.name.trim() || !newPerson.whatsapp.trim()}
-                  className="flex-[2] py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-[2] py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base order-1 sm:order-2"
                 >
                   Crea Membro
                 </button>
@@ -1176,10 +1253,15 @@ const App: React.FC = () => {
 
     return (
       <div className="space-y-8 animate-fade-in">
-        <h2 className="text-2xl font-black text-slate-900 dark:text-white">Archivio (Firmati)</h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">Archivio (Firmati)</h2>
+            <p className="text-slate-500 text-sm mt-1">Sfoglia i documenti completati e certificati.</p>
+          </div>
+        </div>
         <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-[2.5rem] overflow-hidden shadow-sm">
-           <div className="overflow-x-auto">
-              <table className="w-full text-left">
+           <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left min-w-[600px]">
                  <thead className="bg-slate-50 dark:bg-white/[0.02] text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-widest border-b border-slate-100 dark:border-white/10">
                     <tr><th className="px-6 py-4">Destinatario</th><th className="px-6 py-4">Documento</th><th className="px-6 py-4">Data Firma</th><th className="px-6 py-4 text-right">Audit / PDF</th></tr>
                  </thead>
@@ -1201,6 +1283,9 @@ const App: React.FC = () => {
                         </tr>
                       );
                     })}
+                    {signedList.length === 0 && (
+                      <tr><td colSpan={4} className="py-20 text-center text-slate-400 text-sm italic">Nessun documento firmato ancora.</td></tr>
+                    )}
                  </tbody>
               </table>
            </div>
@@ -1245,23 +1330,23 @@ const App: React.FC = () => {
     
     return (
       <div className="space-y-8 animate-fade-in">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-2xl font-black text-slate-900 dark:text-white">In Attesa</h2>
-            <p className="text-slate-500 text-sm">Documenti assegnati ma non ancora firmati.</p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+          <div className="w-full">
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">In Attesa</h2>
+            <p className="text-slate-500 text-sm mt-1">Documenti assegnati ma non ancora firmati.</p>
           </div>
           <button 
             disabled={reminderRecipients.length === 0}
             onClick={() => setIsReminderPreviewOpen(true)} 
-            className="px-6 py-3 bg-amber-500 text-white rounded-2xl font-bold flex items-center gap-2 shadow-xl shadow-amber-500/20 hover:bg-amber-600 transition-all disabled:opacity-50 disabled:grayscale"
+            className="w-full sm:w-auto px-6 py-4 bg-amber-500 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-amber-500/20 hover:bg-amber-600 transition-all disabled:opacity-50 disabled:grayscale text-sm sm:text-base"
           >
             <Clock className="w-5 h-5" /> 
             Sollecita tutti: {reminderRecipients.length}
           </button>
         </div>
         <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-[2.5rem] overflow-hidden shadow-sm">
-           <div className="overflow-x-auto">
-              <table className="w-full text-left">
+           <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left min-w-[600px]">
                  <thead className="bg-slate-50 dark:bg-white/[0.02] text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-widest border-b border-slate-100 dark:border-white/10">
                     <tr><th className="px-6 py-4">Destinatario</th><th className="px-6 py-4">Documento</th><th className="px-6 py-4">Stato</th><th className="px-6 py-4 text-right">Azione</th></tr>
                  </thead>
@@ -1280,6 +1365,9 @@ const App: React.FC = () => {
                         </tr>
                       );
                     })}
+                    {pendingList.length === 0 && (
+                      <tr><td colSpan={4} className="py-20 text-center text-slate-400 text-sm italic">Tutto in regola! Nessun documento in attesa.</td></tr>
+                    )}
                  </tbody>
               </table>
            </div>
@@ -1290,9 +1378,12 @@ const App: React.FC = () => {
 
   const ProductionsContent = () => (
     <div className="space-y-8 animate-fade-in">
-       <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-black text-slate-900 dark:text-white">I Miei Progetti</h2>
-          <button onClick={() => setIsNewProdModalOpen(true)} className="px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold flex items-center gap-2 shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95"><Plus className="w-5 h-5" /> Nuovo Progetto</button>
+       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+          <div>
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">I Miei Progetti</h2>
+            <p className="text-slate-500 text-sm mt-1">Gestisci tutte le tue produzioni attive.</p>
+          </div>
+          <button onClick={() => setIsNewProdModalOpen(true)} className="w-full sm:w-auto px-6 py-4 bg-indigo-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95 text-sm sm:text-base"><Plus className="w-5 h-5" /> Nuovo Progetto</button>
        </div>
        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {data.productions.map(p => (
@@ -1300,333 +1391,4 @@ const App: React.FC = () => {
                <div className={`p-3 rounded-2xl mb-4 inline-block ${selectedProdId === p.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-400 dark:text-slate-500 group-hover:bg-indigo-600/10 group-hover:text-indigo-600'}`}>
                   < Clapperboard className="w-6 h-6" />
                </div>
-               <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">{p.title}</h3>
-               <p className="text-xs text-slate-500 font-medium line-clamp-2 mb-4">{p.notes || 'Nessuna descrizione.'}</p>
-               <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-white/5">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(p.createdAt).toLocaleDateString()}</span>
-                  <ChevronRight className={`w-4 h-4 ${selectedProdId === p.id ? 'text-indigo-600' : 'text-slate-300'}`} />
-               </div>
-            </div>
-          ))}
-       </div>
-    </div>
-  );
-
-  // --- PUBLIC VIEWS ---
-
-  const SigningHub = () => {
-    const person = data.people.find(p => p.hubToken === publicHubToken);
-    const pendingDocs = person ? data.instances.filter(i => i.personId === person.id && i.status !== DocStatus.SIGNED) : [];
-    
-    useEffect(() => {
-      if (person && pendingDocs.length > 0) {
-        const now = new Date().toISOString();
-        setData(prev => ({
-          ...prev,
-          instances: prev.instances.map(i => {
-            if (i.personId === person.id && (i.status === DocStatus.NOT_SENT || i.status === DocStatus.SENT)) {
-              return { ...i, status: DocStatus.OPENED, openedAt: now };
-            }
-            return i;
-          })
-        }));
-      }
-    }, [publicHubToken]);
-
-    if (!person) return <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-white font-black uppercase tracking-widest text-center">Link non valido o scaduto.</div>;
-
-    if (activeDocId) return <SignDocumentWizard person={person} instanceId={activeDocId} />;
-
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 flex flex-col items-center transition-all overflow-y-auto">
-         <div className="w-full max-w-xl animate-fade-in pb-20">
-            <div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center shadow-2xl mb-8 mx-auto"><ShieldCheck className="w-10 h-10 text-white" /></div>
-            <h1 className="text-3xl font-black text-slate-900 dark:text-white text-center leading-tight">Ciao, {person.name}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-center mt-2 font-medium">Hai {pendingDocs.length} documenti da firmare per <b>{activeProduction?.title}</b>.</p>
-
-            <div className="mt-12 space-y-4">
-               {pendingDocs.length > 0 ? pendingDocs.map(inst => {
-                 const t = data.templates.find(temp => temp.id === inst.templateId);
-                 const isDocx = t?.fileName.toLowerCase().endsWith('.docx');
-                 
-                 return (
-                   <div key={inst.id} className="relative">
-                     <button 
-                       disabled={isDocx}
-                       onClick={() => window.location.hash = `${window.location.hash}/doc/${inst.id}`} 
-                       className={`w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 p-6 rounded-[2.5rem] flex items-center justify-between group hover:border-indigo-600 transition-all shadow-sm active:scale-[0.98] ${isDocx ? 'opacity-70 grayscale cursor-not-allowed' : ''}`}
-                     >
-                        <div className="flex items-center gap-5 text-left">
-                           <div className="w-12 h-12 bg-indigo-600/10 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all"><FileText className="w-6 h-6" /></div>
-                           <div>
-                              <h4 className="font-black text-slate-900 dark:text-white">{t?.name}</h4>
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t?.type} {isDocx ? '• DOCX (Scarica)' : '• PDF'}</p>
-                           </div>
-                        </div>
-                        <div className="bg-indigo-600 text-white p-2.5 rounded-xl shadow-lg group-hover:scale-110 transition-all">
-                          {isDocx ? <Download className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
-                        </div>
-                     </button>
-                     {isDocx && (
-                       <div className="mt-2 px-6 flex items-center gap-2">
-                         <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                         <p className="text-[10px] text-slate-500">I documenti Word non possono essere firmati online. Scaricalo o contatta la produzione.</p>
-                       </div>
-                     )}
-                   </div>
-                 );
-               }) : (
-                 <div className="text-center py-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-[3rem] shadow-sm">
-                    <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                    <h3 className="text-xl font-black text-slate-900 dark:text-white">Tutto completato!</h3>
-                    <p className="text-slate-500 text-sm mt-1">Grazie, hai firmato tutti i documenti richiesti.</p>
-                 </div>
-               )}
-            </div>
-            
-            <div className="mt-20 p-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-[2.5rem] text-center shadow-xl">
-               <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-widest mb-2">Problemi?</h4>
-               <p className="text-xs text-slate-500 mb-6">Contatta la produzione se hai domande sui documenti.</p>
-               <button 
-                 onClick={() => window.open(`https://wa.me/${activeProduction?.producerPhone || ''}?text=${encodeURIComponent(`Ciao, sono ${person.name}. Ho problemi con i documenti per ${activeProduction?.title}.`)}`, '_blank')}
-                 className="w-full py-4 bg-slate-100 dark:bg-white/5 text-indigo-600 dark:text-indigo-400 font-black rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-200 transition-all"
-               >
-                 <MessageSquare className="w-4 h-4" />
-                 Contatta Produzione
-               </button>
-            </div>
-         </div>
-      </div>
-    );
-  };
-
-  const SignDocumentWizard = ({ person, instanceId }: { person: Person, instanceId: string }) => {
-    const inst = data.instances.find(i => i.id === instanceId);
-    const template = data.templates.find(t => t.id === inst?.templateId);
-    const [step, setStep] = useState(1);
-    const [formData, setFormData] = useState<Record<string, string>>({
-      'name': person.name,
-      'date': new Date().toLocaleDateString('it-IT')
-    });
-    const [signature, setSignature] = useState<string | null>(null);
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    if (!inst || !template) return null;
-
-    const handleSubmit = async () => {
-      if (!signature) return;
-      setIsSubmitting(true);
-      try {
-        const { url, hash } = await generateSignedPdf(template, formData, signature);
-        const now = new Date().toISOString();
-        
-        const auditData = {
-          signedAt: now,
-          typedName: formData.name,
-          userAgent: navigator.userAgent,
-          pdfHash: hash
-        };
-
-        const notif: AppNotification = {
-          id: 'n-' + Date.now(),
-          productionId: person.productionId,
-          personId: person.id,
-          documentInstanceId: inst.id,
-          type: 'DOCUMENT_SIGNED',
-          title: 'Firma completata',
-          message: `${person.name} ha firmato ${template.name}`,
-          createdAt: now,
-          readAt: null
-        };
-
-        setData(prev => ({
-          ...prev,
-          instances: prev.instances.map(i => i.id === inst.id ? { ...i, status: DocStatus.SIGNED, signedAt: now, finalPdfUrl: url, auditJSON: JSON.stringify(auditData) } : i),
-          notifications: [notif, ...prev.notifications]
-        }));
-        setStep(3);
-      } catch (err) {
-        alert("Errore durante la generazione del PDF. Riprova.");
-      } finally {
-        setIsSubmitting(false);
-      }
-    };
-
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center p-6 transition-all overflow-y-auto">
-         <div className="w-full max-w-xl animate-fade-in pb-20">
-            <button onClick={() => window.location.hash = `#/sign/${person.hubToken}`} className="mb-8 flex items-center gap-2 text-slate-500 font-bold text-sm hover:text-indigo-600 transition-colors"><ArrowLeft className="w-4 h-4" /> Torna all'elenco</button>
-
-            <div className="flex items-center gap-4 mb-8">
-               <div className="w-12 h-12 bg-indigo-600/10 text-indigo-600 rounded-2xl flex items-center justify-center"><FileText className="w-6 h-6" /></div>
-               <div>
-                  <h1 className="text-xl font-black text-slate-900 dark:text-white leading-tight">{template.name}</h1>
-                  <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">{template.type}</p>
-               </div>
-            </div>
-
-            {step === 1 && (
-               <div className="space-y-6">
-                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 p-8 rounded-[2.5rem] shadow-xl">
-                     <h3 className="text-lg font-black text-slate-900 dark:text-white mb-6">Dati Documento</h3>
-                     <div className="space-y-5">
-                        {template.fields.filter(f => f.type !== 'signature').map(f => (
-                          <div key={f.id}>
-                             <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-2 px-1">{f.label}</label>
-                             <input 
-                                value={formData[f.id] || ''} 
-                                onChange={e => setFormData({...formData, [f.id]: e.target.value})} 
-                                type="text" 
-                                className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-5 py-4 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-inner" 
-                             />
-                          </div>
-                        ))}
-                     </div>
-                  </div>
-                  <button onClick={() => setStep(2)} className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-lg shadow-xl shadow-indigo-600/30 active:scale-95 transition-all">Prosegui alla firma</button>
-               </div>
-            )}
-
-            {step === 2 && (
-               <div className="space-y-6">
-                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 p-8 rounded-[2.5rem] shadow-xl">
-                     <h3 className="text-lg font-black text-slate-900 dark:text-white mb-6">La tua Firma</h3>
-                     <p className="text-sm text-slate-500 mb-6">Disegna la tua firma nel riquadro sottostante.</p>
-                     <div className="bg-slate-50 dark:bg-slate-950 rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 shadow-inner">
-                        <SignatureCanvas onSave={setSignature} onClear={() => setSignature(null)} />
-                     </div>
-                  </div>
-                  <div className="flex gap-4">
-                     <button onClick={() => setStep(1)} className="flex-1 py-5 bg-slate-200 dark:bg-white/5 text-slate-600 dark:text-slate-300 rounded-[2rem] font-black transition-all">Indietro</button>
-                     <button 
-                        disabled={!signature || isSubmitting} 
-                        onClick={handleSubmit} 
-                        className="flex-[2] py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-lg shadow-xl shadow-indigo-600/30 disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-3"
-                     >
-                        {isSubmitting ? <Loader className="w-6 h-6 animate-spin" /> : "Firma Documento"}
-                     </button>
-                  </div>
-               </div>
-            )}
-
-            {step === 3 && (
-               <div className="text-center py-20 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-[3rem] shadow-2xl animate-fade-in">
-                  <div className="w-20 h-20 bg-green-500/10 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg"><Check className="w-10 h-10" /></div>
-                  <h2 className="text-2xl font-black text-slate-900 dark:text-white">Documento Inviato!</h2>
-                  <p className="text-slate-500 mt-2 px-8">La produzione riceverà la tua firma certificata immediatamente.</p>
-                  <button onClick={() => window.location.hash = `#/sign/${person.hubToken}`} className="mt-10 px-10 py-4 bg-indigo-600 text-white rounded-[2rem] font-black shadow-lg hover:bg-indigo-700 transition-all">Torna all'elenco</button>
-               </div>
-            )}
-         </div>
-      </div>
-    );
-  };
-
-  if (publicHubToken) return <SigningHub />;
-
-  const personToDelete = data.people.find(p => p.id === personToDeleteId);
-  const personSignedCount = data.instances.filter(i => i.personId === personToDeleteId && i.status === DocStatus.SIGNED).length;
-
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex overflow-hidden transition-all duration-300">
-      <Sidebar />
-      <div className="flex-1 flex flex-col h-screen overflow-y-auto custom-scrollbar lg:pl-[280px]">
-        <Header />
-        <main className="p-4 sm:p-8 pb-24 max-w-6xl mx-auto w-full">
-          {activeTab === 'DASHBOARD' && <DashboardContent />}
-          {activeTab === 'PEOPLE' && <PeopleContent />}
-          {activeTab === 'ARCHIVE' && <ArchiveContent />}
-          {activeTab === 'PENDING' && <PendingContent />}
-          {activeTab === 'TEMPLATES' && <TemplateContent />}
-          {activeTab === 'PRODUCTIONS' && <ProductionsContent />}
-        </main>
-      </div>
-      <NotificationsPanel />
-      <BulkSendModal type="INIT" />
-      <BulkSendModal type="REMIND" />
-      <ReminderPreviewModal />
-      <ImportCastModal />
-      <PdfMapperTool />
-      
-      {/* Existing Modals Updated */}
-      {isNewProdModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl border border-slate-200 dark:border-white/10 shadow-2xl p-8 transition-all">
-            <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-6">Nuovo Progetto</h3>
-            <div className="space-y-4">
-              <input value={newProdData.title} onChange={e => setNewProdData({...newProdData, title: e.target.value})} type="text" className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none" placeholder="Titolo Film" />
-              <input value={newProdData.phone} onChange={e => setNewProdData({...newProdData, phone: e.target.value})} type="text" className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none" placeholder="WhatsApp Produzione (per assistenza)" />
-              <textarea value={newProdData.notes} onChange={e => setNewProdData({...newProdData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none h-24" placeholder="Note..." />
-              <button onClick={handleCreateProduction} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/20 active:scale-95 transition-all">Crea Produzione</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isRenameModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl border border-slate-200 dark:border-white/10 shadow-2xl p-8">
-            <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-6">Gestione Progetto</h3>
-            <div className="space-y-4">
-              <input value={renameValue} onChange={e => setRenameValue(e.target.value)} type="text" className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none" placeholder="Titolo" />
-              <input value={renamePhone} onChange={e => setRenamePhone(e.target.value)} type="text" className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 outline-none" placeholder="WhatsApp Produzione" />
-              <div className="flex gap-3">
-                <button onClick={() => setIsRenameModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-500 font-black rounded-2xl">Annulla</button>
-                <button onClick={handleUpdateProduction} className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl">Salva</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {templateToDeleteId && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-slate-200 dark:border-white/10 shadow-2xl p-8 transition-all relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-2 bg-red-500" />
-            <div className="flex flex-col items-center text-center">
-              <div className="w-20 h-20 bg-red-500/10 text-red-600 rounded-full flex items-center justify-center mb-6 shadow-lg"><AlertTriangle className="w-10 h-10" /></div>
-              <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Eliminare template?</h3>
-              <p className="text-slate-500 text-sm mb-6">Vuoi eliminare definitivamente <b>{data.templates.find(t => t.id === templateToDeleteId)?.name}</b>? L'azione non è annullabile.</p>
-              <div className="flex w-full gap-4">
-                <button onClick={() => setTemplateToDeleteId(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 font-black rounded-2xl">Annulla</button>
-                <button onClick={confirmDeleteTemplate} className="flex-1 py-4 bg-red-600 text-white font-black rounded-2xl shadow-xl shadow-red-600/20">Elimina</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {personToDeleteId && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] border border-slate-200 dark:border-white/10 shadow-2xl p-8 transition-all relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-2 bg-red-500" />
-            <div className="flex flex-col items-center text-center">
-              <div className="w-20 h-20 bg-red-500/10 text-red-600 rounded-full flex items-center justify-center mb-6 shadow-lg"><UserMinus className="w-10 h-10" /></div>
-              <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Eliminare membro?</h3>
-              <p className="text-slate-500 text-sm mb-6">
-                Vuoi eliminare <b>{personToDelete?.name}</b> dalla produzione <b>{activeProduction?.title}</b>? 
-                Questa azione eliminerà anche i documenti assegnati a questa persona.
-              </p>
-              
-              {personSignedCount > 0 && (
-                <div className="w-full p-4 mb-6 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-2xl text-left flex gap-3">
-                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
-                  <p className="text-[10px] text-amber-700 dark:text-amber-500 font-bold">
-                    ATTENZIONE: Verranno rimossi anche i <b>{personSignedCount} PDF firmati</b> archiviati per questa persona.
-                  </p>
-                </div>
-              )}
-
-              <div className="flex w-full gap-4">
-                <button onClick={() => setPersonToDeleteId(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 font-black rounded-2xl">Annulla</button>
-                <button onClick={confirmDeletePerson} className="flex-1 py-4 bg-red-600 text-white font-black rounded-2xl shadow-xl shadow-red-600/20">Elimina</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default App;
+               <h3 className="text-xl font-bold text-slate-900 dark:text-white
