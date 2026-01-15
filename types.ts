@@ -117,6 +117,7 @@ export interface FormState {
   firstName: string;
   lastName: string;
   birthDate: string;
+  taxCode: string; // Added Codice Fiscale
   role: string;
   idNumber: string;
   signature: string;

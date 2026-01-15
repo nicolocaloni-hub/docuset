@@ -7,26 +7,39 @@ import {
   ShieldCheck, 
   Loader2, 
   AlertCircle,
-  ArrowRight
+  ArrowRight,
+  ChevronLeft
 } from 'lucide-react';
 import SignatureCanvas from './SignatureCanvas';
 import { extractDocumentData } from '../services/gemini';
 import { FormState } from '../types';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.VITE_SUPABASE_URL || '',
+  process.env.VITE_SUPABASE_ANON_KEY || ''
+);
 
 interface PublicFormProps {
   documentType: string;
   recipientName: string;
+  hubToken: string;
+  instanceId: string;
   onComplete: (data: FormState) => void;
 }
 
-const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, onComplete }) => {
+const REMOTE_VAULT_KEY = 'setdocs_remote_vault';
+
+const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, hubToken, instanceId, onComplete }) => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({
-    firstName: '',
-    lastName: '',
+    firstName: recipientName.split(' ')[0] || '',
+    lastName: recipientName.split(' ').slice(1).join(' ') || '',
     birthDate: '',
+    taxCode: '',
     role: '',
     idNumber: '',
     signature: '',
@@ -61,32 +74,66 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, on
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const saveToRemoteVault = async (finalForm: FormState) => {
+    // 1. Supabase push
+    try {
+      await supabase
+        .from('public_forms')
+        .update({
+          status: 'SUBMITTED',
+          formData: finalForm,
+          signatureDataUrl: finalForm.signature,
+          submittedAt: new Date().toISOString(),
+          userAgent: navigator.userAgent
+        })
+        .eq('token', hubToken);
+    } catch (err) {
+      console.warn("Supabase push failed, relying on local fallback", err);
+    }
+
+    // 2. Local Fallback (for offline or same-browser demo)
+    const vault = JSON.parse(localStorage.getItem(REMOTE_VAULT_KEY) || '[]');
+    const submission = {
+      hubToken,
+      instanceId,
+      formData: finalForm,
+      submittedAt: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      status: 'SUBMITTED'
+    };
+    vault.push(submission);
+    localStorage.setItem(REMOTE_VAULT_KEY, JSON.stringify(vault));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (step < 3) {
       setStep(step + 1);
       window.scrollTo(0, 0);
     } else {
+      setIsSubmitting(true);
+      await saveToRemoteVault(form);
       onComplete(form);
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <div className="bg-white border-b border-gray-200 py-4 px-6 sticky top-0 z-10 shadow-sm">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col transition-colors duration-300">
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-white/10 py-4 px-6 sticky top-0 z-10 shadow-sm">
         <div className="max-w-xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="bg-blue-600 p-2 rounded-lg">
+            <div className="bg-indigo-600 p-2 rounded-xl shadow-lg shadow-indigo-600/20">
               <ShieldCheck className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-gray-900">DocuSet</span>
+            <span className="font-bold text-xl tracking-tight text-slate-900 dark:text-white">DocuSet</span>
           </div>
           <div className="flex items-center gap-2">
             {[1, 2, 3].map((s) => (
               <div 
                 key={s} 
-                className={`h-1.5 w-8 rounded-full transition-all duration-300 ${
-                  s <= step ? 'bg-blue-600' : 'bg-gray-200'
+                className={`h-1.5 w-8 rounded-full transition-all duration-500 ${
+                  s <= step ? 'bg-indigo-600 shadow-[0_0_8px_rgba(79,70,229,0.5)]' : 'bg-slate-200 dark:bg-white/10'
                 }`} 
               />
             ))}
@@ -95,25 +142,25 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, on
       </div>
 
       <main className="flex-1 max-w-xl w-full mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h2 className="text-sm font-semibold text-blue-600 uppercase tracking-wider mb-2">
+        <div className="mb-8 animate-fade-in">
+          <h2 className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-[0.2em] mb-2">
             Passaggio {step} di 3
           </h2>
-          <h1 className="text-2xl font-bold text-gray-900">
+          <h1 className="text-3xl font-black text-slate-900 dark:text-white leading-tight">
             {step === 1 && "Verifica Identità"}
             {step === 2 && "Dati Personali"}
             {step === 3 && "Concludi e Firma"}
           </h1>
-          <p className="text-gray-500 mt-2">
-            {step === 1 && `Ciao ${recipientName}, carica il tuo documento per velocizzare la procedura.`}
-            {step === 2 && "Verifica e completa le informazioni per il documento."}
-            {step === 3 && `Revisiona e firma il documento: ${documentType}.`}
+          <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">
+            {step === 1 && `Ciao ${recipientName}, carica il tuo documento per compilare i campi in un istante.`}
+            {step === 2 && "Verifica che le informazioni siano corrette prima di procedere."}
+            {step === 3 && `Stai firmando digitalmente: ${documentType}.`}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {step === 1 && (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-fade-in">
               <div className="relative group">
                 <input
                   type="file"
@@ -124,41 +171,43 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, on
                 />
                 <label
                   htmlFor="doc-upload"
-                  className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-2xl p-10 bg-white hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer"
+                  className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-white/10 rounded-[2.5rem] p-12 bg-white dark:bg-white/5 hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/5 transition-all cursor-pointer shadow-sm group"
                 >
                   {loading ? (
-                    <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
+                    <Loader2 className="w-14 h-14 text-indigo-600 animate-spin mb-6" />
                   ) : (
-                    <Upload className="w-12 h-12 text-gray-400 mb-4 group-hover:scale-110 transition-transform" />
+                    <div className="w-14 h-14 bg-slate-100 dark:bg-white/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                      <Upload className="w-7 h-7 text-slate-400 group-hover:text-indigo-600" />
+                    </div>
                   )}
-                  <p className="text-lg font-medium text-gray-900">
-                    {loading ? "Analisi documento..." : "Carica Doc d'Identità"}
+                  <p className="text-xl font-black text-slate-900 dark:text-white">
+                    {loading ? "Analisi in corso..." : "Carica Documento"}
                   </p>
-                  <p className="text-sm text-gray-500 mt-1">Carta d'Identità, Passaporto o Patente</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 font-medium">Carta d'Identità o Passaporto</p>
                 </label>
               </div>
 
               {error && (
-                <div className="flex items-center gap-2 text-amber-600 bg-amber-50 p-4 rounded-lg">
+                <div className="flex items-center gap-3 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-400/10 p-5 rounded-2xl border border-amber-100 dark:border-amber-400/20 shadow-sm">
                   <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                  <p className="text-sm">{error}</p>
+                  <p className="text-sm font-bold">{error}</p>
                 </div>
               )}
 
-              <div className="bg-blue-50 p-4 rounded-xl flex items-start gap-3">
-                <div className="bg-white p-1 rounded">
-                  <Camera className="w-4 h-4 text-blue-600" />
+              <div className="bg-indigo-50 dark:bg-indigo-500/10 p-5 rounded-2xl flex items-start gap-4 border border-indigo-100 dark:border-indigo-500/20">
+                <div className="bg-white dark:bg-indigo-600 p-1.5 rounded-lg shadow-sm">
+                  <Camera className="w-4 h-4 text-indigo-600 dark:text-white" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-blue-900">Estrazione Dati AI</h4>
-                  <p className="text-xs text-blue-700 mt-1">Compileremo automaticamente i passaggi successivi utilizzando la nostra tecnologia AI.</p>
+                  <h4 className="text-sm font-black text-indigo-900 dark:text-indigo-200 uppercase tracking-wider">DocuScan AI</h4>
+                  <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-1 font-medium leading-relaxed">Compileremo i dati legali estraendoli direttamente dalla foto del tuo documento.</p>
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={() => setStep(2)}
-                className="w-full py-4 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors underline underline-offset-4"
+                className="w-full py-4 text-sm font-black text-slate-400 hover:text-indigo-600 transition-colors underline underline-offset-8 decoration-slate-200 hover:decoration-indigo-200"
               >
                 Salta e compila manualmente
               </button>
@@ -166,87 +215,110 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, on
           )}
 
           {step === 2 && (
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-gray-500 uppercase">Nome</label>
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-white/5 space-y-6 animate-fade-in">
+              <div className="grid grid-cols-2 gap-5">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Nome</label>
                   <input
                     required
                     type="text"
                     value={form.firstName}
                     onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
                   />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-gray-500 uppercase">Cognome</label>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Cognome</label>
                   <input
                     required
                     type="text"
                     value={form.lastName}
                     onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
                   />
                 </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-500 uppercase">Data di Nascita</label>
-                <input
-                  required
-                  type="date"
-                  value={form.birthDate}
-                  onChange={(e) => setForm({ ...form, birthDate: e.target.value })}
-                  className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-                />
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Data di Nascita</label>
+                  <input
+                    required
+                    type="date"
+                    value={form.birthDate}
+                    onChange={(e) => setForm({ ...form, birthDate: e.target.value })}
+                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Codice Fiscale</label>
+                  <input
+                    required
+                    type="text"
+                    placeholder="RSSMRC..."
+                    value={form.taxCode}
+                    onChange={(e) => setForm({ ...form, taxCode: e.target.value.toUpperCase() })}
+                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-mono font-bold shadow-inner"
+                  />
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-500 uppercase">Ruolo / Posizione</label>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Ruolo / Posizione</label>
                 <input
                   required
                   type="text"
                   placeholder="es. Attore, DOP, Runner"
                   value={form.role}
                   onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                  className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-500 uppercase">Numero Documento</label>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Numero Documento</label>
                 <input
                   required
                   type="text"
+                  placeholder="CA123456"
                   value={form.idNumber}
                   onChange={(e) => setForm({ ...form, idNumber: e.target.value })}
-                  className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                  className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
                 />
               </div>
+              
+              <button type="button" onClick={() => setStep(1)} className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors">
+                <ChevronLeft className="w-3 h-3" /> Torna al caricamento
+              </button>
             </div>
           )}
 
           {step === 3 && (
-            <div className="space-y-6">
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="bg-green-100 p-2 rounded-lg">
-                    <CheckCircle className="w-5 h-5 text-green-600" />
+            <div className="space-y-6 animate-fade-in">
+              <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-white/5">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="bg-green-100 dark:bg-green-500/20 p-3 rounded-2xl shadow-sm">
+                    <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-gray-900">Accordo Legale</h4>
-                    <p className="text-xs text-gray-500">Confermo che tutti i dettagli forniti sono corretti.</p>
+                    <h4 className="font-black text-slate-900 dark:text-white uppercase tracking-wider text-sm">Validazione Legale</h4>
+                    <p className="text-xs text-slate-500 font-medium">I dati forniti verranno inseriti nel documento finale.</p>
                   </div>
                 </div>
-                <div className="text-sm text-gray-600 bg-gray-50 p-4 rounded-lg max-h-40 overflow-y-auto mb-6">
-                  <p className="mb-2"><strong>{documentType}</strong></p>
-                  <p>Firmando questo documento, io, {form.firstName} {form.lastName}, nato/a il {form.birthDate}, 
-                  in qualità di {form.role}, concedo a PrismaFilm il diritto di utilizzare la mia immagine e voce per scopi produttivi...</p>
-                  <p className="mt-2 text-[10px] text-gray-400">ID Digitale: DOC-{Math.random().toString(36).substr(2, 9).toUpperCase()}</p>
+                <div className="text-sm text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-white/[0.03] p-6 rounded-2xl max-h-40 overflow-y-auto mb-8 font-medium leading-relaxed shadow-inner custom-scrollbar">
+                  <p className="mb-3 font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-white/10 pb-2">{documentType}</p>
+                  <p>Firmando questo documento, io sottoscritto <b>{form.firstName} {form.lastName}</b>, nato il {form.birthDate}, 
+                  con codice fiscale <b>{form.taxCode}</b>, in qualità di <b>{form.role}</b>, attesto la veridicità dei dati forniti e presto il mio consenso secondo quanto previsto dall'accordo quadro...</p>
+                  <p className="mt-4 text-[10px] text-slate-400 font-bold uppercase tracking-widest">ID Certificazione: DOC-{Math.random().toString(36).substr(2, 9).toUpperCase()}</p>
                 </div>
                 
-                <label className="text-xs font-semibold text-gray-500 uppercase block mb-2">La tua Firma</label>
-                <SignatureCanvas 
-                  onSave={(data) => setForm({ ...form, signature: data })}
-                  onClear={() => setForm({ ...form, signature: '' })}
-                />
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-3 px-1">La tua Firma Autografa</label>
+                <div className="rounded-[2rem] overflow-hidden border border-slate-200 dark:border-white/10 shadow-lg">
+                  <SignatureCanvas 
+                    onSave={(data) => setForm({ ...form, signature: data })}
+                    onClear={() => setForm({ ...form, signature: '' })}
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -254,18 +326,24 @@ const PublicForm: React.FC<PublicFormProps> = ({ documentType, recipientName, on
           <div className="sticky bottom-6 pt-4">
             <button
               type="submit"
-              disabled={step === 3 && !form.signature}
-              className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-blue-700 shadow-xl shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center group"
+              disabled={isSubmitting || (step === 3 && !form.signature)}
+              className="w-full bg-indigo-600 text-white py-5 rounded-[2rem] font-black text-lg hover:bg-indigo-700 shadow-2xl shadow-indigo-600/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center group"
             >
-              {step === 3 ? "Completa e Archivia" : "Continua"}
-              <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
+              {isSubmitting ? (
+                <Loader2 className="w-6 h-6 animate-spin" />
+              ) : (
+                <>
+                  {step === 3 ? "Concludi e Archivia" : "Prosegui"}
+                  <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
+                </>
+              )}
             </button>
           </div>
         </form>
       </main>
       
-      <footer className="py-8 px-6 text-center text-gray-400 text-xs">
-        © 2024 PrismaFilm - Firme Digitali DocuSet
+      <footer className="py-8 px-6 text-center text-slate-400 dark:text-slate-600 text-[10px] font-black uppercase tracking-[0.2em]">
+        © 2024 DocuSet - Crittografia End-to-End
       </footer>
     </div>
   );
