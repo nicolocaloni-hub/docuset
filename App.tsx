@@ -9,7 +9,7 @@ import {
   FileIcon, FileUp, Info, Moon, Sun, Copy, ClipboardCheck, Phone, Layout,
   Share2, ArrowLeft, ExternalLink, Edit2, AlertTriangle, FileSpreadsheet,
   MousePointer2, History, Shield, FileQuestion, Mail, StickyNote, UserMinus,
-  RefreshCw, CheckCheck, UserPlus, Link
+  RefreshCw, CheckCheck, UserPlus, Link, FilePlus
 } from 'lucide-react';
 import { 
   DocStatus, TemplateType, AppState, Production, Person, Template, 
@@ -26,7 +26,6 @@ const STORAGE_KEY = 'setdocs_app_data_v4';
 const THEME_KEY = 'setdocs_theme';
 
 // Configurazione Supabase per Vite - Using import.meta.env for client-side exposure in Vite
-// We use (import.meta as any) to bypass TypeScript "Property 'env' does not exist" error without modifying tsconfig
 const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
 const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
@@ -88,6 +87,7 @@ const App: React.FC = () => {
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [isProdDropdownOpen, setIsProdDropdownOpen] = useState(false);
   const [isNewMemberModalOpen, setIsNewMemberModalOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   const [newProdData, setNewProdData] = useState({ title: '', notes: '', phone: '' });
   const [renameValue, setRenameValue] = useState('');
@@ -97,6 +97,8 @@ const App: React.FC = () => {
   const [templateToDeleteId, setTemplateToDeleteId] = useState<string | null>(null);
   const [templateToMapId, setTemplateToMapId] = useState<string | null>(null);
   const [personToDeleteId, setPersonToDeleteId] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Routing per Public View
   const queryParams = new URLSearchParams(window.location.search);
@@ -243,6 +245,68 @@ const App: React.FC = () => {
       instances: prev.instances.filter(i => i.personId !== personToDeleteId)
     }));
     setPersonToDeleteId(null);
+  };
+
+  const handleImportTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !supabase) return;
+
+    setIsImporting(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `templates/${fileName}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('documents')
+        .getPublicUrl(filePath);
+
+      const newTemplate: Template = {
+        id: 't-' + Date.now(),
+        name: file.name.replace(/\.[^/.]+$/, ""),
+        type: TemplateType.OTHER,
+        fileUrl: publicUrl,
+        fileName: file.name,
+        fileType: file.type,
+        isBlank: true,
+        fields: [],
+        createdAt: new Date().toISOString()
+      };
+
+      setData(prev => ({
+        ...prev,
+        templates: [...prev.templates, newTemplate]
+      }));
+
+      // Also try to sync to DB if table exists (optional based on schema)
+      try {
+        await supabase.from('templates').insert([{
+          id: newTemplate.id,
+          name: newTemplate.name,
+          type: newTemplate.type,
+          file_url: newTemplate.fileUrl,
+          file_name: newTemplate.fileName,
+          file_type: newTemplate.fileType,
+          created_at: newTemplate.createdAt
+        }]);
+      } catch (dbErr) {
+        console.warn("Could not sync template to database table, stored locally.");
+      }
+
+      alert("Template importato con successo!");
+    } catch (error: any) {
+      console.error("Errore durante l'importazione:", error);
+      alert(`Errore: ${error.message || "Impossibile caricare il file. Verifica i permessi del bucket 'documents'."}`);
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const Header = () => (
@@ -589,6 +653,23 @@ const App: React.FC = () => {
           <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">Libreria Template</h2>
           <p className="text-slate-500 text-sm mt-1 font-medium">Gestisci i modelli di documento per la tua produzione.</p>
         </div>
+        <div className="flex items-center gap-3">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleImportTemplate} 
+            className="hidden" 
+            accept=".pdf,.doc,.docx,image/*"
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isImporting}
+            className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2"
+          >
+            {isImporting ? <Loader className="w-4 h-4 animate-spin" /> : <FilePlus className="w-4 h-4" />}
+            Importa Template
+          </button>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-white/10 shadow-sm overflow-hidden">
@@ -628,6 +709,7 @@ const App: React.FC = () => {
                         <Eye className="w-5 h-5" />
                       </button>
                       <button 
+                        onClick={() => fileInputRef.current?.click()}
                         className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all"
                         title="Carica / Sostituisci"
                       >
