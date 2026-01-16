@@ -1,3 +1,4 @@
+
 export enum DocStatus {
   NOT_SENT = 'NON INVIATO',
   SENT = 'INVIATO',
@@ -17,27 +18,27 @@ export interface FieldMapping {
   id: string;
   label: string;
   type: 'text' | 'date' | 'signature';
-  x: number; // Legacy pixel x
-  y: number; // Legacy pixel y
-  xPct?: number; // Percentage x (0..1)
-  yPct?: number; // Percentage y (0..1)
+  x: number;
+  y: number;
+  xPct?: number;
+  yPct?: number;
   page: number;
   fontSize?: number;
-  width?: number; // Legacy pixel width
-  height?: number; // Legacy pixel height
-  wPct?: number; // Percentage width
-  hPct?: number; // Percentage height
+  width?: number;
+  height?: number;
+  wPct?: number;
+  hPct?: number;
 }
 
 export interface Template {
   id: string;
   name: string;
   type: TemplateType;
-  fileUrl: string; // Original blank PDF Base64
+  fileUrl: string;
   fileName: string;
   fileType: string;
   isBlank: boolean;
-  fields: FieldMapping[]; // This is used as the fieldPlacementMap
+  fields: FieldMapping[];
   createdAt: string;
   notes?: string;
 }
@@ -51,9 +52,9 @@ export interface Person {
   whatsapp: string;
   email?: string;
   notes?: string;
-  hubToken: string; // The secret token for the signing hub
+  hubToken: string;
   fieldsJSON?: string;
-  removedAt?: string; // Soft delete timestamp
+  removedAt?: string;
 }
 
 export interface Production {
@@ -61,7 +62,8 @@ export interface Production {
   title: string;
   createdAt: string;
   notes?: string;
-  producerPhone?: string; // For "Contact Production" link
+  producerPhone?: string;
+  formLink?: string; // Link to external form (Fillout, Jotform, etc.)
 }
 
 export interface DocumentInstance {
@@ -73,8 +75,8 @@ export interface DocumentInstance {
   sentAt?: string;
   openedAt?: string;
   signedAt?: string;
-  finalPdfUrl?: string; // Generated signed PDF Base64
-  auditJSON?: string; // Traceability data
+  finalPdfUrl?: string;
+  auditJSON?: string;
 }
 
 export interface AppNotification {
@@ -99,11 +101,15 @@ export interface SubmissionRequest {
 
 export interface Submission {
   id: string;
-  code: string;
   productionId: string;
   submittedAt: string;
-  formData: any;
-  signatureUrl: string;
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+  notes?: string;
+  hasSignature: boolean;
+  signatureData?: string; // URL or base64
 }
 
 export interface AppState {
@@ -113,6 +119,7 @@ export interface AppState {
   instances: DocumentInstance[];
   notifications: AppNotification[];
   submissionRequests?: SubmissionRequest[];
+  submissions: Submission[]; // Local storage for imported CSV data
 }
 
 export enum DocumentStatus {
@@ -135,7 +142,7 @@ export interface FormState {
   firstName: string;
   lastName: string;
   birthDate: string;
-  taxCode: string; // Added Codice Fiscale
+  taxCode: string;
   role: string;
   idNumber: string;
   signature: string;
