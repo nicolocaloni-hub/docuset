@@ -26,27 +26,14 @@ const STORAGE_KEY = 'setdocs_app_data_v4';
 const THEME_KEY = 'setdocs_theme';
 
 // Configurazione Supabase (da environment variables)
-// Fix: Using process.env instead of import.meta.env as per environment standards and to resolve type errors
+// Fix: Use process.env for environment variables to match the project's standard and fix TypeScript ImportMeta error
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-// Fix: Using process.env instead of import.meta.env as per environment standards and to resolve type errors
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 const SignatureCanvas = ({ onSave, onClear }: { onSave: (data: string) => void; onClear: () => void }) => (
   <SignatureCanvasComponent onSave={onSave} onClear={onClear} />
 );
-
-// --- UTILS ---
-const computeFileHash = async (base64Data: string): Promise<string> => {
-  const binaryString = atob(base64Data.split(',')[1] || base64Data);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-};
 
 const INITIAL_DATA: AppState = {
   productions: [
@@ -90,6 +77,8 @@ const App: React.FC = () => {
   const [selectedProdId, setSelectedProdId] = useState<string | null>(() => {
     return data.productions.length > 0 ? data.productions[0].id : null;
   });
+  
+  // Modal States
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isBulkSendOpen, setIsBulkSendOpen] = useState(false);
@@ -98,18 +87,18 @@ const App: React.FC = () => {
   const [isNewProdModalOpen, setIsNewProdModalOpen] = useState(false);
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [isProdDropdownOpen, setIsProdDropdownOpen] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isNewMemberModalOpen, setIsNewMemberModalOpen] = useState(false);
+
   const [newProdData, setNewProdData] = useState({ title: '', notes: '', phone: '' });
   const [renameValue, setRenameValue] = useState('');
   const [renamePhone, setRenamePhone] = useState('');
-  const [isNewMemberModalOpen, setIsNewMemberModalOpen] = useState(false);
   const [newMemberData, setNewMemberData] = useState({ name: '', role: '', department: '', whatsapp: '' });
 
   const [templateToDeleteId, setTemplateToDeleteId] = useState<string | null>(null);
   const [templateToMapId, setTemplateToMapId] = useState<string | null>(null);
   const [personToDeleteId, setPersonToDeleteId] = useState<string | null>(null);
 
-  // Routing per Public View (stateless)
+  // Routing per Public View
   const queryParams = new URLSearchParams(window.location.search);
   const publicToken = queryParams.get('t');
 
@@ -126,7 +115,6 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!supabase || !selectedProdId) return;
 
-    // Sottoscrizione ai cambiamenti negli inviti di firma per la produzione corrente
     const channel = supabase
       .channel('schema-db-changes')
       .on(
@@ -151,7 +139,6 @@ const App: React.FC = () => {
   }, [selectedProdId]);
 
   const handleSigningNotification = (invite: any) => {
-    // Aggiungi una notifica locale e aggiorna lo stato
     const newNotif: AppNotification = {
       id: 'notif-' + Date.now(),
       productionId: invite.production_id,
@@ -194,8 +181,19 @@ const App: React.FC = () => {
     setNewProdData({ title: '', notes: '', phone: '' });
   };
 
+  const handleUpdateProduction = () => {
+    if (!renameValue.trim() || !selectedProdId) return;
+    setData(prev => ({
+      ...prev,
+      productions: prev.productions.map(p => 
+        p.id === selectedProdId ? { ...p, title: renameValue, producerPhone: renamePhone } : p
+      )
+    }));
+    setIsRenameModalOpen(false);
+  };
+
   const handleAddMember = () => {
-    if (!newMemberData.name.trim() || !selectedProdId) return;
+    if (!newMemberData.name.trim() || !newMemberData.whatsapp.trim() || !selectedProdId) return;
     const newPerson: Person = {
       id: 'per-' + Date.now(),
       productionId: selectedProdId,
@@ -219,7 +217,6 @@ const App: React.FC = () => {
       templateId,
       status: DocStatus.NOT_SENT,
     };
-    setData(prev => ({ ...prev, Painter: [...prev.instances, newInst] }));
     setData(prev => ({ ...prev, instances: [...prev.instances, newInst] }));
   };
 
@@ -255,7 +252,11 @@ const App: React.FC = () => {
           <Menu className="w-6 h-6" />
         </button>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 group cursor-pointer" onClick={() => { setRenameValue(activeProduction?.title || ''); setRenamePhone(activeProduction?.producerPhone || ''); setIsRenameModalOpen(true); }}>
+          <div className="flex items-center gap-2 group cursor-pointer" onClick={() => { 
+            setRenameValue(activeProduction?.title || ''); 
+            setRenamePhone(activeProduction?.producerPhone || ''); 
+            setIsRenameModalOpen(true); 
+          }}>
             <h1 className="text-sm sm:text-lg font-bold text-slate-900 dark:text-white truncate max-w-[150px] sm:max-w-none">
               {activeProduction?.title || 'Seleziona Progetto'}
             </h1>
@@ -569,18 +570,12 @@ const App: React.FC = () => {
     </div>
   );
 
-  // Fix: Added missing TemplateContent component to resolve reference error
   const TemplateContent = () => (
     <div className="space-y-8 animate-fade-in w-full">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between w-full">
         <div>
           <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white leading-tight">Libreria Template</h2>
           <p className="text-slate-500 text-sm mt-1 font-medium">Gestisci i modelli di documento per la tua produzione.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:gap-3">
-          <button className="col-span-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2">
-            <Plus className="w-4 h-4" /> Nuovo Template
-          </button>
         </div>
       </div>
 
@@ -648,12 +643,10 @@ const App: React.FC = () => {
     const currentPerson = people[index];
     const isLast = index === people.length - 1;
 
-    // TODO: Qui integriamo la creazione dell'invito su Supabase prima di aprire WhatsApp
     const handleOpenWA = async () => {
       const link = getPublicLink(currentPerson.hubToken);
       const message = `Ciao ${currentPerson.name}, ti ho inviato i documenti da firmare per ${activeProduction?.title}. Puoi accedere qui: ${link}`;
       
-      // Salvataggio server-side dell'invito
       if (supabase) {
         const instancesToSign = prodInstances.filter(i => i.personId === currentPerson.id && i.status !== DocStatus.SIGNED);
         const firstInstanceId = instancesToSign[0]?.id || 'bulk';
@@ -766,7 +759,7 @@ const App: React.FC = () => {
     );
   };
 
-  if (publicToken) return <PublicView token={publicToken} onComplete={() => window.location.href = window.location.pathname} />;
+  if (publicToken) return <PublicForm hubToken={publicToken} onComplete={() => window.location.href = window.location.pathname} />;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex overflow-hidden transition-all duration-300">
@@ -777,21 +770,157 @@ const App: React.FC = () => {
           {activeTab === 'DASHBOARD' && <DashboardContent />}
           {activeTab === 'PEOPLE' && <PeopleContent />}
           {activeTab === 'TEMPLATES' && <TemplateContent />}
-          {/* Altri contenuti... */}
+          {activeTab === 'ARCHIVE' && <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Sezione Archivio in Arrivo</div>}
+          {activeTab === 'PENDING' && <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Sezione In Attesa in Arrivo</div>}
+          {activeTab === 'PRODUCTIONS' && (
+            <div className="space-y-8 animate-fade-in">
+              <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-black">Le Tue Produzioni</h2>
+                <button onClick={() => setIsNewProdModalOpen(true)} className="px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold flex items-center gap-2 shadow-lg"><Plus className="w-5 h-5" /> Nuovo Progetto</button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {data.productions.map(p => (
+                  <div key={p.id} onClick={() => setSelectedProdId(p.id)} className={`p-8 bg-white dark:bg-slate-900 rounded-[2.5rem] border-2 cursor-pointer transition-all ${selectedProdId === p.id ? 'border-indigo-600 shadow-xl' : 'border-slate-100 dark:border-white/5 hover:border-slate-200'}`}>
+                    <Clapperboard className={`w-10 h-10 mb-6 ${selectedProdId === p.id ? 'text-indigo-600' : 'text-slate-400'}`} />
+                    <h3 className="text-xl font-black mb-2">{p.title}</h3>
+                    <p className="text-sm text-slate-500 font-medium">{p.notes || 'Nessuna nota.'}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </main>
       </div>
+      
       <NotificationsPanel />
       <BulkSendModal />
-      {/* Altri modali... */}
-    </div>
-  );
-};
 
-// Componente Wrapper per la vista pubblica
-const PublicView = ({ token, onComplete }: { token: string; onComplete: () => void }) => {
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-       <PublicForm hubToken={token} onComplete={onComplete} />
+      {/* --- MODAL RENDERING --- */}
+
+      {isNewMemberModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] border border-slate-200 dark:border-white/10 shadow-2xl p-10">
+            <h3 className="text-2xl font-black mb-8">Nuovo Membro Crew</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Nome Completo</label>
+                <input required value={newMemberData.name} onChange={e => setNewMemberData({...newMemberData, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 font-bold" placeholder="es. Mario Rossi" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Ruolo</label>
+                  <input value={newMemberData.role} onChange={e => setNewMemberData({...newMemberData, role: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 font-bold" placeholder="es. DOP" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Reparto</label>
+                  <input value={newMemberData.department} onChange={e => setNewMemberData({...newMemberData, department: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 font-bold" placeholder="es. Camera" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">WhatsApp (Obbligatorio)</label>
+                <input required value={newMemberData.whatsapp} onChange={e => setNewMemberData({...newMemberData, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 font-bold" placeholder="39..." />
+              </div>
+              <div className="flex gap-4 pt-4">
+                <button onClick={() => setIsNewMemberModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 rounded-2xl font-bold">Annulla</button>
+                <button onClick={handleAddMember} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg">Crea Membro</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isRenameModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] border border-slate-200 dark:border-white/10 shadow-2xl p-10">
+            <h3 className="text-2xl font-black mb-8">Rinomina Produzione</h3>
+            <div className="space-y-4">
+              <input value={renameValue} onChange={e => setRenameValue(e.target.value)} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 font-bold" placeholder="Titolo Produzione" />
+              <input value={renamePhone} onChange={e => setRenamePhone(e.target.value)} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 font-bold" placeholder="Telefono Produzione" />
+              <div className="flex gap-4 pt-4">
+                <button onClick={() => setIsRenameModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 rounded-2xl font-bold">Annulla</button>
+                <button onClick={handleUpdateProduction} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold">Salva Modifiche</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[3rem] border border-slate-200 dark:border-white/10 shadow-2xl p-10">
+            <h3 className="text-2xl font-black mb-4">Importa Crew</h3>
+            <p className="text-slate-500 mb-6 text-sm">Incolla una lista separata da virgola (Nome, Ruolo, WhatsApp) o un elenco di nomi.</p>
+            <textarea 
+              id="import-area"
+              className="w-full h-64 bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-[2rem] p-6 outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
+              placeholder="Mario Rossi, DOP, 39333...&#10;Anna Neri, Runner, 39344..."
+            />
+            <div className="flex gap-4 pt-4">
+              <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 rounded-2xl font-bold">Annulla</button>
+              <button onClick={() => {
+                const text = (document.getElementById('import-area') as HTMLTextAreaElement).value;
+                const lines = text.split('\n').filter(l => l.trim());
+                const newPeople: Person[] = lines.map(l => {
+                  const [name, role, wa] = l.split(',').map(s => s.trim());
+                  return {
+                    id: 'per-' + Math.random().toString(36).substr(2, 9),
+                    productionId: selectedProdId!,
+                    name: name || 'Nuovo Membro',
+                    role: role || 'Crew',
+                    department: 'General',
+                    whatsapp: wa || '393330000000',
+                    hubToken: crypto.randomUUID()
+                  };
+                });
+                setData(prev => ({ ...prev, people: [...prev.people, ...newPeople] }));
+                setIsImportModalOpen(false);
+              }} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold">Importa {`(${prodPeople.length} esistenti)`}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {templateToDeleteId && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[3rem] p-10 text-center border border-slate-200 dark:border-white/10 shadow-2xl">
+            <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-6" />
+            <h3 className="text-xl font-black mb-4">Elimina Template?</h3>
+            <p className="text-slate-500 mb-8 text-sm font-medium">Questa azione è irreversibile. Tutte le assegnazioni correnti verranno rimosse.</p>
+            <div className="flex gap-4">
+              <button onClick={() => setTemplateToDeleteId(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 rounded-2xl font-bold">Annulla</button>
+              <button onClick={confirmDeleteTemplate} className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-bold">Elimina</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {personToDeleteId && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[3rem] p-10 text-center border border-slate-200 dark:border-white/10 shadow-2xl">
+            <UserMinus className="w-16 h-16 text-red-500 mx-auto mb-6" />
+            <h3 className="text-xl font-black mb-4">Rimuovi Membro?</h3>
+            <p className="text-slate-500 mb-8 text-sm font-medium">Vuoi rimuovere permanentemente questo membro dalla produzione?</p>
+            <div className="flex gap-4">
+              <button onClick={() => setPersonToDeleteId(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/5 rounded-2xl font-bold">Annulla</button>
+              <button onClick={confirmDeletePerson} className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-bold">Rimuovi</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isNewProdModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] border border-slate-200 dark:border-white/10 shadow-2xl p-10">
+            <h3 className="text-2xl font-black mb-8">Nuovo Progetto</h3>
+            <div className="space-y-4">
+              <input value={newProdData.title} onChange={e => setNewProdData({...newProdData, title: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 font-bold" placeholder="Titolo Produzione" />
+              <input value={newProdData.phone} onChange={e => setNewProdData({...newProdData, phone: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 font-bold" placeholder="WhatsApp Produzione" />
+              <textarea value={newProdData.notes} onChange={e => setNewProdData({...newProdData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-[2rem] px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 h-32 resize-none" placeholder="Note facoltative..." />
+              <button onClick={handleCreateProduction} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg">Crea Produzione</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

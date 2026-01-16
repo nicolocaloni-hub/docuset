@@ -15,10 +15,9 @@ import { extractDocumentData } from '../services/gemini';
 import { FormState, DocStatus } from '../types';
 import { createClient } from '@supabase/supabase-js';
 
-// Configurazione Supabase
-// Fix: Using process.env instead of import.meta.env as per environment standards and to resolve type errors
+// Configurazione Supabase - Updated to use process.env to resolve TypeScript error with ImportMeta
+// Fix: Use process.env for environment variables to match the project's standard
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-// Fix: Using process.env instead of import.meta.env as per environment standards and to resolve type errors
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
