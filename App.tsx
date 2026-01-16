@@ -25,10 +25,10 @@ declare const PDFLib: any;
 const STORAGE_KEY = 'setdocs_app_data_v4';
 const THEME_KEY = 'setdocs_theme';
 
-// Configurazione Supabase per Vite - Fixed to use process.env to avoid ImportMeta errors
-// Use process.env for environment variables to match the project's standard and fix ImportMeta error
-const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+// Configurazione Supabase per Vite - Using import.meta.env for client-side exposure in Vite
+// We use (import.meta as any) to bypass TypeScript "Property 'env' does not exist" error without modifying tsconfig
+const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 const SignatureCanvas = ({ onSave, onClear }: { onSave: (data: string) => void; onClear: () => void }) => (
@@ -268,9 +268,14 @@ const App: React.FC = () => {
       </div>
       <div className="flex items-center gap-3">
         {!supabase && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-bold border border-red-100">
-            <AlertCircle className="w-3.5 h-3.5" />
-            Configurazione Errata (VITE_SUPABASE_...)
+          <div className="flex flex-col items-end">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[10px] font-bold border border-red-100">
+              <AlertCircle className="w-3.5 h-3.5" />
+              Configurazione Errata
+            </div>
+            <div className="text-[8px] text-slate-400 mt-1 font-mono">
+              envSource=vite urlPresent={!!(import.meta as any).env?.VITE_SUPABASE_URL} keyPresent={!!(import.meta as any).env?.VITE_SUPABASE_ANON_KEY}
+            </div>
           </div>
         )}
         <button 

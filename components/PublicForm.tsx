@@ -15,10 +15,10 @@ import { extractDocumentData } from '../services/gemini';
 import { FormState, DocStatus } from '../types';
 import { createClient } from '@supabase/supabase-js';
 
-// Configurazione Supabase - Updated to use process.env to resolve TypeScript error with ImportMeta
-// Fix: Use process.env for environment variables to match the project's standard
-const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+// Configurazione Supabase - Using import.meta.env for Vite compatibility
+// We use (import.meta as any) to bypass potential TypeScript environment type mismatch errors
+const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 interface PublicFormProps {
@@ -54,7 +54,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
   useEffect(() => {
     const validateToken = async () => {
       if (!supabase) {
-        setValidationError("Configurazione server mancante.");
+        setValidationError("Configurazione server mancante (VITE_SUPABASE_URL/KEY).");
         setIsValidating(false);
         return;
       }
@@ -284,7 +284,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
                     type="text"
                     value={form.firstName}
                     onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium"
+                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
                   />
                 </div>
                 <div className="space-y-2">
@@ -294,7 +294,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
                     type="text"
                     value={form.lastName}
                     onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium"
+                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
                   />
                 </div>
               </div>
@@ -307,7 +307,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
                   placeholder="RSSMRC..."
                   value={form.taxCode}
                   onChange={(e) => setForm({ ...form, taxCode: e.target.value.toUpperCase() })}
-                  className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-mono font-bold"
+                  className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-mono font-bold shadow-inner"
                 />
               </div>
 
@@ -319,7 +319,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
                   placeholder="es. Attore, DOP, Runner"
                   value={form.role}
                   onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium"
+                  className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
                 />
               </div>
               
