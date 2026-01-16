@@ -25,8 +25,8 @@ declare const PDFLib: any;
 const STORAGE_KEY = 'setdocs_app_data_v4';
 const THEME_KEY = 'setdocs_theme';
 
-// Configurazione Supabase (da environment variables)
-// Fix: Use process.env for environment variables to match the project's standard and fix TypeScript ImportMeta error
+// Configurazione Supabase per Vite - Fixed to use process.env to avoid ImportMeta errors
+// Use process.env for environment variables to match the project's standard and fix ImportMeta error
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
@@ -267,6 +267,12 @@ const App: React.FC = () => {
         </div>
       </div>
       <div className="flex items-center gap-3">
+        {!supabase && (
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-bold border border-red-100">
+            <AlertCircle className="w-3.5 h-3.5" />
+            Configurazione Errata (VITE_SUPABASE_...)
+          </div>
+        )}
         <button 
           onClick={() => setIsNotificationsOpen(true)}
           className="p-2.5 bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 rounded-xl relative hover:bg-slate-200 dark:hover:bg-white/10 transition-all"
@@ -861,20 +867,20 @@ const App: React.FC = () => {
                 const text = (document.getElementById('import-area') as HTMLTextAreaElement).value;
                 const lines = text.split('\n').filter(l => l.trim());
                 const newPeople: Person[] = lines.map(l => {
-                  const [name, role, wa] = l.split(',').map(s => s.trim());
+                  const parts = l.split(',').map(s => s.trim());
                   return {
                     id: 'per-' + Math.random().toString(36).substr(2, 9),
                     productionId: selectedProdId!,
-                    name: name || 'Nuovo Membro',
-                    role: role || 'Crew',
+                    name: parts[0] || 'Nuovo Membro',
+                    role: parts[1] || 'Crew',
                     department: 'General',
-                    whatsapp: wa || '393330000000',
+                    whatsapp: parts[2] || '393330000000',
                     hubToken: crypto.randomUUID()
                   };
                 });
                 setData(prev => ({ ...prev, people: [...prev.people, ...newPeople] }));
                 setIsImportModalOpen(false);
-              }} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold">Importa {`(${prodPeople.length} esistenti)`}</button>
+              }} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold">Importa</button>
             </div>
           </div>
         </div>
