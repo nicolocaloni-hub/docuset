@@ -1,8 +1,7 @@
 
 import { sql } from '@vercel/postgres';
-import { VercelRequest, VercelResponse } from '@vercel/node';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   const { token } = req.query;
 
   if (!token || typeof token !== 'string') {

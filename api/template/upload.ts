@@ -1,11 +1,9 @@
 
 import { put } from '@vercel/blob';
 import { sql } from '@vercel/postgres';
-import { VercelRequest, VercelResponse } from '@vercel/node';
-// Fix: Import Buffer to ensure it is available in the TypeScript compilation context for Node.js
 import { Buffer } from 'buffer';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).end();
 
   // Note: For larger files, Vercel Blob recommends client-side uploads with tokens

@@ -1,11 +1,9 @@
 
 import { sql } from '@vercel/postgres';
 import { put } from '@vercel/blob';
-import { VercelRequest, VercelResponse } from '@vercel/node';
-// Fix: Import Buffer to ensure it is available in the TypeScript compilation context for Node.js
 import { Buffer } from 'buffer';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const { token, formData, signatureDataUrl } = req.body;
