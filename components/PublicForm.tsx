@@ -14,13 +14,6 @@ import {
 import SignatureCanvas from './SignatureCanvas';
 import { extractDocumentData } from '../services/gemini';
 import { FormState, DocStatus } from '../types';
-import { createClient } from '@supabase/supabase-js';
-
-// Configurazione Supabase - Using import.meta.env for Vite compatibility
-// Using (import.meta as any).env to bypass TypeScript type definitions issues in some build environments
-const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 interface PublicFormProps {
   hubToken: string;
@@ -54,47 +47,29 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
 
   useEffect(() => {
     const validateToken = async () => {
-      if (!supabase) {
-        setValidationError("Configurazione server mancante (VITE_SUPABASE_URL/KEY).");
-        setIsValidating(false);
-        return;
-      }
-
       try {
-        const { data, error: fetchError } = await supabase
-          .from('signing_invites')
-          .select('*')
-          .eq('token', hubToken)
-          .single();
-
-        if (fetchError || !data) {
-          setValidationError("Link non valido o scaduto.");
-        } else if (data.status === 'SIGNED') {
-          setValidationError("Documento già firmato correttamente.");
-        } else {
-          setInviteData({
-            personName: data.payload.personName,
-            productionTitle: data.payload.productionTitle,
-            templateName: data.payload.templateName,
-            status: data.status
-          });
-          
-          setForm(prev => ({
-            ...prev,
-            firstName: data.payload.personName.split(' ')[0] || '',
-            lastName: data.payload.personName.split(' ').slice(1).join(' ') || ''
-          }));
-
-          // Notifica che il link è stato aperto
-          if (data.status === 'SENT') {
-            await supabase
-              .from('signing_invites')
-              .update({ status: 'OPENED', opened_at: new Date().toISOString() })
-              .eq('token', hubToken);
-          }
+        const res = await fetch(`/api/sign/validate?token=${hubToken}`);
+        if (!res.ok) {
+          const err = await res.json();
+          setValidationError(err.error || "Link non valido.");
+          return;
         }
+        
+        const data = await res.json();
+        setInviteData({
+          personName: data.payload_json.personName || "Utente",
+          productionTitle: data.payload_json.productionTitle || "Produzione",
+          templateName: data.payload_json.templateName || "Documento",
+          status: data.status
+        });
+        
+        setForm(prev => ({
+          ...prev,
+          firstName: (data.payload_json.personName || '').split(' ')[0] || '',
+          lastName: (data.payload_json.personName || '').split(' ').slice(1).join(' ') || ''
+        }));
       } catch (err) {
-        console.error("Errore validazione:", err);
+        console.error(err);
         setValidationError("Errore di connessione.");
       } finally {
         setIsValidating(false);
@@ -141,22 +116,17 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
     } else {
       setIsSubmitting(true);
       try {
-        if (!supabase) throw new Error();
-
-        // 1. Salva la sottomissione
-        await supabase.from('signing_submissions').insert({
-          token: hubToken,
-          form_data: form,
-          signature_data_url: form.signature,
-          user_agent: navigator.userAgent
+        const res = await fetch('/api/sign/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: hubToken,
+            formData: form,
+            signatureDataUrl: form.signature
+          })
         });
 
-        // 2. Aggiorna lo stato dell'invito
-        await supabase
-          .from('signing_invites')
-          .update({ status: 'SIGNED', signed_at: new Date().toISOString() })
-          .eq('token', hubToken);
-
+        if (!res.ok) throw new Error();
         onComplete();
       } catch (err) {
         setError("Errore durante l'invio. Riprova.");
@@ -182,10 +152,10 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
            <h2 className="text-2xl font-black mb-2">{validationError}</h2>
            <p className="text-slate-500 font-medium mb-8">Se ritieni sia un errore, contatta la produzione cinematografica.</p>
            <button 
-             onClick={() => window.location.href = window.location.pathname}
+             onClick={() => window.location.href = '/'}
              className="w-full py-4 bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-200 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 hover:bg-slate-200 transition-all"
            >
-             <LayoutDashboard className="w-4 h-4" /> Vai alla Dashboard
+             <LayoutDashboard className="w-4 h-4" /> Vai alla Home
            </button>
         </div>
       </div>
@@ -236,48 +206,17 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
           {step === 1 && (
             <div className="space-y-6 animate-fade-in">
               <div className="relative group">
-                <input
-                  type="file"
-                  accept="image/*,.pdf"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                  id="doc-upload"
-                />
-                <label
-                  htmlFor="doc-upload"
-                  className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-white/10 rounded-[2.5rem] p-12 bg-white dark:bg-white/5 hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/5 transition-all cursor-pointer shadow-sm group"
-                >
-                  {loading ? (
-                    <Loader2 className="w-14 h-14 text-indigo-600 animate-spin mb-6" />
-                  ) : (
+                <input type="file" accept="image/*,.pdf" onChange={handleFileUpload} className="hidden" id="doc-upload" />
+                <label htmlFor="doc-upload" className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-white/10 rounded-[2.5rem] p-12 bg-white dark:bg-white/5 hover:border-indigo-500 transition-all cursor-pointer shadow-sm group">
+                  {loading ? <Loader2 className="w-14 h-14 text-indigo-600 animate-spin mb-6" /> : (
                     <div className="w-14 h-14 bg-slate-100 dark:bg-white/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                       <Upload className="w-7 h-7 text-slate-400 group-hover:text-indigo-600" />
                     </div>
                   )}
-                  <p className="text-xl font-black text-slate-900 dark:text-white">
-                    {loading ? "Analisi AI..." : "Carica Documento"}
-                  </p>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 font-medium">Carta d'Identità o Passaporto</p>
+                  <p className="text-xl font-black text-slate-900 dark:text-white">{loading ? "Analisi AI..." : "Carica Documento"}</p>
                 </label>
               </div>
-
-              <div className="bg-indigo-50 dark:bg-indigo-500/10 p-5 rounded-2xl flex items-start gap-4 border border-indigo-100 dark:border-indigo-500/20">
-                <div className="bg-white dark:bg-indigo-600 p-1.5 rounded-lg shadow-sm">
-                  <Camera className="w-4 h-4 text-indigo-600 dark:text-white" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-black text-indigo-900 dark:text-indigo-200 uppercase tracking-wider">DocuScan AI</h4>
-                  <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-1 font-medium leading-relaxed">Compileremo i tuoi dati estraendoli direttamente dalla foto.</p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setStep(2)}
-                className="w-full py-4 text-sm font-black text-slate-400 hover:text-indigo-600 transition-colors underline underline-offset-8"
-              >
-                Salta e compila a mano
-              </button>
+              <button type="button" onClick={() => setStep(2)} className="w-full py-4 text-sm font-black text-slate-400 hover:text-indigo-600 transition-colors underline underline-offset-8">Salta e compila a mano</button>
             </div>
           )}
 
@@ -286,53 +225,18 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
               <div className="grid grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Nome</label>
-                  <input
-                    required
-                    type="text"
-                    value={form.firstName}
-                    onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
-                  />
+                  <input required type="text" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium" />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Cognome</label>
-                  <input
-                    required
-                    type="text"
-                    value={form.lastName}
-                    onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                    className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
-                  />
+                  <input required type="text" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium" />
                 </div>
               </div>
-              
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Codice Fiscale</label>
-                <input
-                  required
-                  type="text"
-                  placeholder="RSSMRC..."
-                  value={form.taxCode}
-                  onChange={(e) => setForm({ ...form, taxCode: e.target.value.toUpperCase() })}
-                  className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-mono font-bold shadow-inner"
-                />
+                <input required type="text" value={form.taxCode} onChange={(e) => setForm({ ...form, taxCode: e.target.value.toUpperCase() })} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-mono font-bold" />
               </div>
-
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Ruolo</label>
-                <input
-                  required
-                  type="text"
-                  placeholder="es. Attore, DOP, Runner"
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-medium shadow-inner"
-                />
-              </div>
-              
-              <button type="button" onClick={() => setStep(1)} className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-indigo-600">
-                <ChevronLeft className="w-3 h-3" /> Torna al caricamento
-              </button>
+              <button type="button" onClick={() => setStep(1)} className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-indigo-600"><ChevronLeft className="w-3 h-3" /> Torna al caricamento</button>
             </div>
           )}
 
@@ -340,9 +244,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
             <div className="space-y-6 animate-fade-in">
               <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-white/5">
                 <div className="flex items-center gap-4 mb-6">
-                  <div className="bg-green-100 dark:bg-green-500/20 p-3 rounded-2xl shadow-sm">
-                    <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
-                  </div>
+                  <div className="bg-green-100 dark:bg-green-500/20 p-3 rounded-2xl shadow-sm"><CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" /></div>
                   <div>
                     <h4 className="font-black text-slate-900 dark:text-white uppercase tracking-wider text-sm">Validazione Legale</h4>
                     <p className="text-xs text-slate-500 font-medium">I dati verranno inseriti nel documento finale.</p>
@@ -350,15 +252,11 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
                 </div>
                 <div className="text-sm text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-white/[0.03] p-6 rounded-2xl max-h-40 overflow-y-auto mb-8 font-medium shadow-inner custom-scrollbar">
                   <p className="mb-3 font-black text-slate-900 dark:text-white border-b border-slate-200 dark:border-white/10 pb-2">{inviteData?.templateName}</p>
-                  <p>Firmando questo documento, io sottoscritto <b>{form.firstName} {form.lastName}</b>, attesto la veridicità dei dati forniti e presto il mio consenso per la produzione <b>{inviteData?.productionTitle}</b>.</p>
+                  <p>Firmando questo documento, io sottoscritto <b>{form.firstName} {form.lastName}</b>, attesto la veridicità dei dati forniti per la produzione <b>{inviteData?.productionTitle}</b>.</p>
                 </div>
-                
                 <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-3 px-1">Firma Autografa</label>
                 <div className="rounded-[2rem] overflow-hidden border border-slate-200 dark:border-white/10 shadow-lg">
-                  <SignatureCanvas 
-                    onSave={(data) => setForm({ ...form, signature: data })}
-                    onClear={() => setForm({ ...form, signature: '' })}
-                  />
+                  <SignatureCanvas onSave={(data) => setForm({ ...form, signature: data })} onClear={() => setForm({ ...form, signature: '' })} />
                 </div>
               </div>
             </div>
@@ -368,24 +266,16 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
             <button
               type="submit"
               disabled={isSubmitting || (step === 3 && !form.signature)}
-              className="w-full bg-indigo-600 text-white py-5 rounded-[2rem] font-black text-lg hover:bg-indigo-700 shadow-2xl shadow-indigo-600/30 disabled:opacity-50 transition-all flex items-center justify-center group"
+              className="w-full bg-indigo-600 text-white py-5 rounded-[2rem] font-black text-lg hover:bg-indigo-700 shadow-2xl disabled:opacity-50 transition-all flex items-center justify-center group"
             >
-              {isSubmitting ? (
-                <Loader2 className="w-6 h-6 animate-spin" />
-              ) : (
-                <>
-                  {step === 3 ? "Firma e Invia" : "Prosegui"}
-                  <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
-                </>
+              {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+                <>{step === 3 ? "Firma e Invia" : "Prosegui"}<ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" /></>
               )}
             </button>
           </div>
         </form>
       </main>
-      
-      <footer className="py-8 px-6 text-center text-slate-400 dark:text-slate-600 text-[10px] font-black uppercase tracking-[0.2em]">
-        © 2024 DocuSet - Crittografia End-to-End
-      </footer>
+      <footer className="py-8 px-6 text-center text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">© 2024 DocuSet</footer>
     </div>
   );
 };
