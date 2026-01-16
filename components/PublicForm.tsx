@@ -8,7 +8,8 @@ import {
   Loader2, 
   AlertCircle,
   ArrowRight,
-  ChevronLeft
+  ChevronLeft,
+  LayoutDashboard
 } from 'lucide-react';
 import SignatureCanvas from './SignatureCanvas';
 import { extractDocumentData } from '../services/gemini';
@@ -16,7 +17,7 @@ import { FormState, DocStatus } from '../types';
 import { createClient } from '@supabase/supabase-js';
 
 // Configurazione Supabase - Using import.meta.env for Vite compatibility
-// We use (import.meta as any) to bypass potential TypeScript environment type mismatch errors
+// Using (import.meta as any).env to bypass TypeScript type definitions issues in some build environments
 const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
 const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
@@ -179,7 +180,13 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
         <div className="bg-white dark:bg-slate-900 p-10 rounded-[3rem] border border-slate-200 dark:border-white/10 shadow-2xl text-center max-w-sm">
            <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-6" />
            <h2 className="text-2xl font-black mb-2">{validationError}</h2>
-           <p className="text-slate-500 font-medium">Se ritieni sia un errore, contatta la produzione cinematografica.</p>
+           <p className="text-slate-500 font-medium mb-8">Se ritieni sia un errore, contatta la produzione cinematografica.</p>
+           <button 
+             onClick={() => window.location.href = window.location.pathname}
+             className="w-full py-4 bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-200 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 hover:bg-slate-200 transition-all"
+           >
+             <LayoutDashboard className="w-4 h-4" /> Vai alla Dashboard
+           </button>
         </div>
       </div>
     );

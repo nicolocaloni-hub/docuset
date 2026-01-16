@@ -269,15 +269,16 @@ const App: React.FC = () => {
       <div className="flex items-center gap-3">
         {!supabase && (
           <div className="flex flex-col items-end">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[10px] font-bold border border-red-100">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[10px] font-bold border border-red-100 shadow-sm">
               <AlertCircle className="w-3.5 h-3.5" />
-              Configurazione Errata
-            </div>
-            <div className="text-[8px] text-slate-400 mt-1 font-mono">
-              envSource=vite urlPresent={!!(import.meta as any).env?.VITE_SUPABASE_URL} keyPresent={!!(import.meta as any).env?.VITE_SUPABASE_ANON_KEY}
+              Errore Env (Supabase)
             </div>
           </div>
         )}
+        <div className="hidden sm:block text-[8px] text-slate-400 font-mono text-right opacity-50 hover:opacity-100 transition-opacity">
+           envSource=vite urlPresent={!!(import.meta as any).env?.VITE_SUPABASE_URL}<br/>
+           keyPresent={!!(import.meta as any).env?.VITE_SUPABASE_ANON_KEY}
+        </div>
         <button 
           onClick={() => setIsNotificationsOpen(true)}
           className="p-2.5 bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 rounded-xl relative hover:bg-slate-200 dark:hover:bg-white/10 transition-all"
@@ -477,10 +478,10 @@ const App: React.FC = () => {
           <p className="text-slate-500 text-sm mt-1 font-medium">Gestisci i membri della produzione e i loro documenti.</p>
         </div>
         <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:gap-3">
-          <button onClick={() => setIsImportModalOpen(true)} className="px-4 py-3 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
+          <button onClick={() => setIsImportModalOpen(true)} className="px-4 py-3 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center justify-center gap-2 shadow-sm">
             <FileUp className="w-4 h-4" /> Importa
           </button>
-          <button onClick={() => setIsBulkSendOpen(true)} className="px-4 py-3 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
+          <button onClick={() => setIsBulkSendOpen(true)} className="px-4 py-3 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center justify-center gap-2 shadow-sm">
             <Send className="w-4 h-4" /> Invia Richieste
           </button>
           <button onClick={() => setIsNewMemberModalOpen(true)} className="col-span-2 sm:col-span-1 px-6 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2">
@@ -597,7 +598,6 @@ const App: React.FC = () => {
               <tr>
                 <th className="px-8 py-5">Nome Template</th>
                 <th className="px-8 py-5">Tipo</th>
-                <th className="px-8 py-5">Data Creazione</th>
                 <th className="px-8 py-5 text-right">Azioni</th>
               </tr>
             </thead>
@@ -609,22 +609,38 @@ const App: React.FC = () => {
                       <div className="bg-indigo-600/10 p-2.5 rounded-xl text-indigo-600">
                         <FileText className="w-5 h-5" />
                       </div>
-                      <p className="font-black text-slate-800 dark:text-slate-200 text-sm">{t.name}</p>
+                      <div>
+                        <p className="font-black text-slate-800 dark:text-slate-200 text-sm">{t.name}</p>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Creato il {new Date(t.createdAt).toLocaleDateString()}</p>
+                      </div>
                     </div>
                   </td>
                   <td className="px-8 py-6">
-                    <span className="text-xs font-bold text-slate-600 dark:text-slate-400">{t.type}</span>
-                  </td>
-                  <td className="px-8 py-6">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(t.createdAt).toLocaleDateString()}</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 rounded-full border border-slate-200 dark:border-white/10">{t.type}</span>
                   </td>
                   <td className="px-8 py-6 text-right">
-                    <button 
-                      onClick={() => setTemplateToDeleteId(t.id)}
-                      className="p-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-all"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button 
+                        onClick={() => window.open(t.fileUrl, '_blank')}
+                        className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all"
+                        title="Visualizza"
+                      >
+                        <Eye className="w-5 h-5" />
+                      </button>
+                      <button 
+                        className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all"
+                        title="Carica / Sostituisci"
+                      >
+                        <FileUp className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={() => setTemplateToDeleteId(t.id)}
+                        className="p-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-all"
+                        title="Elimina"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
