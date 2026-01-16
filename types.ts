@@ -1,4 +1,3 @@
-
 export enum DocStatus {
   NOT_SENT = 'NON INVIATO',
   SENT = 'INVIATO',
@@ -54,6 +53,7 @@ export interface Person {
   notes?: string;
   hubToken: string; // The secret token for the signing hub
   fieldsJSON?: string;
+  removedAt?: string; // Soft delete timestamp
 }
 
 export interface Production {
@@ -89,12 +89,30 @@ export interface AppNotification {
   readAt: string | null;
 }
 
+export interface SubmissionRequest {
+  code: string;
+  productionId: string;
+  label: string;
+  createdAt: string;
+  usedAt?: string;
+}
+
+export interface Submission {
+  id: string;
+  code: string;
+  productionId: string;
+  submittedAt: string;
+  formData: any;
+  signatureUrl: string;
+}
+
 export interface AppState {
   productions: Production[];
   people: Person[];
   templates: Template[];
   instances: DocumentInstance[];
   notifications: AppNotification[];
+  submissionRequests?: SubmissionRequest[];
 }
 
 export enum DocumentStatus {
