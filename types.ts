@@ -55,6 +55,9 @@ export interface Person {
   hubToken: string;
   fieldsJSON?: string;
   removedAt?: string;
+  intolerances?: string;
+  hasCar?: boolean;
+  deliveredAt?: string; // Data di consegna dal form Tally
 }
 
 export interface Production {
@@ -63,7 +66,7 @@ export interface Production {
   createdAt: string;
   notes?: string;
   producerPhone?: string;
-  formLink?: string; // Link to external form (Fillout, Jotform, etc.)
+  formLink?: string;
 }
 
 export interface DocumentInstance {
@@ -109,7 +112,7 @@ export interface Submission {
   phone: string;
   notes?: string;
   hasSignature: boolean;
-  signatureData?: string; // URL or base64
+  signatureData?: string;
 }
 
 export interface AppState {
@@ -119,7 +122,7 @@ export interface AppState {
   instances: DocumentInstance[];
   notifications: AppNotification[];
   submissionRequests?: SubmissionRequest[];
-  submissions: Submission[]; // Local storage for imported CSV data
+  submissions: Submission[];
 }
 
 export enum DocumentStatus {
