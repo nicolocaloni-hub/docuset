@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { GoogleGenAI, Type } from '@google/genai';
 import { 
   FileCheck, LayoutDashboard, Clapperboard, Users, FileText, Settings, 
   Plus, Search, MoreVertical, Send, MessageSquare, Download, Trash2, 
@@ -10,7 +11,7 @@ import {
   Share2, ArrowLeft, ExternalLink, Edit2, AlertTriangle, FileSpreadsheet,
   MousePointer2, History, Shield, FileQuestion, Mail, StickyNote, UserMinus,
   RefreshCw, CheckCheck, UserPlus, Link, FilePlus, Database, HardDrive, 
-  Activity, Terminal, RotateCcw, QrCode, Upload, FileCode
+  Activity, Terminal, RotateCcw, QrCode, Upload, FileCode, Zap, Smartphone
 } from 'lucide-react';
 import { 
   DocStatus, TemplateType, AppState, Production, Person, Template, 
@@ -88,9 +89,9 @@ const App: React.FC = () => {
   const [isNewProdModalOpen, setIsNewProdModalOpen] = useState(false);
   const [isNewMemberModalOpen, setIsNewMemberModalOpen] = useState(false);
   const [isRecipientModalOpen, setIsRecipientModalOpen] = useState(false);
+  const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [isProdListOpen, setIsProdListOpen] = useState(false);
-  const [isDocxPreviewModalOpen, setIsDocxPreviewModalOpen] = useState(false);
-  const [docxParsedData, setDocxParsedData] = useState<{ members: any[], duplicates: number }>({ members: [], duplicates: 0 });
+  const [isParsingDoc, setIsParsingDoc] = useState(false);
   const [isSyncingTally, setIsSyncingTally] = useState(false);
 
   // Modal State for deletions
@@ -186,7 +187,7 @@ const App: React.FC = () => {
     setIsEditingTitle(false);
   };
 
-  const handleSendWhatsApp = (p?: Person) => {
+  const handleSendWhatsApp = async (p?: Person) => {
     const baseUrl = activeProduction?.formLink;
     if (!baseUrl) {
       alert("Configura il link Tally nelle impostazioni della produzione.");
@@ -195,39 +196,236 @@ const App: React.FC = () => {
     }
 
     let finalLink = baseUrl;
+    let personName = '';
     if (p) {
       const separator = baseUrl.includes('?') ? '&' : '?';
       finalLink += `${separator}pid=${selectedProdId}&mid=${p.id}`;
+      // Extract first name or use the full name if it's a single word
+      personName = p.name.split(' ')[0];
     }
 
-    const message = `Ciao! Compila questi dati per la produzione ${activeProduction?.title}: ${finalLink}`;
+    const greeting = personName ? `Ciao ${personName}!` : 'Ciao!';
+    const message = `${greeting} Compila questi dati per la produzione "${activeProduction?.title}":
+
+${finalLink}
+
+I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di privacy.`;
+
     const phone = p ? p.whatsapp.replace(/[^\d+]/g, '') : '';
-    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    let url = '';
+    if (isAndroid) {
+      url = `intent://send?phone=${phone}&text=${encodeURIComponent(message)}#Intent;package=com.whatsapp;scheme=whatsapp;end;`;
+    } else {
+      url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+    }
+    
     window.open(url, '_blank');
-    setIsRecipientModalOpen(false);
+    if (p) {
+      setData(prev => ({
+        ...prev,
+        people: prev.people.map(person => 
+          person.id === p.id ? { ...person, sentAt: new Date().toISOString() } : person
+        )
+      }));
+    }
+  };
+
+  const generateFilledPdf = async (template: Template, formData: any, signatureUrl: string) => {
+    try {
+      // Fetch the blank PDF
+      const existingPdfBytes = await fetch(template.fileUrl).then(res => res.arrayBuffer());
+      const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
+      const pages = pdfDoc.getPages();
+
+      // Embed signature if available
+      let signatureImage: any = null;
+      if (signatureUrl) {
+        try {
+          const sigRes = await fetch(signatureUrl);
+          const sigBytes = await sigRes.arrayBuffer();
+          try {
+            signatureImage = await pdfDoc.embedPng(sigBytes);
+          } catch (e) {
+            signatureImage = await pdfDoc.embedJpg(sigBytes);
+          }
+        } catch (e) {
+          console.error("Failed to load signature image", e);
+        }
+      }
+
+      // Draw fields
+      for (const field of template.fields) {
+        const pageIndex = field.page || 0;
+        if (pageIndex >= pages.length) continue;
+        const page = pages[pageIndex];
+        const { width, height } = page.getSize();
+
+        const x = field.xPct !== undefined ? field.xPct * width : field.x;
+        const y = field.yPct !== undefined ? (1 - field.yPct) * height : height - field.y;
+
+        if (field.type === 'signature' && signatureImage) {
+          const sigWidth = field.wPct !== undefined ? field.wPct * width : (field.width || 150);
+          const sigHeight = field.hPct !== undefined ? field.hPct * height : (field.height || 50);
+          page.drawImage(signatureImage, {
+            x,
+            y: y - sigHeight,
+            width: sigWidth,
+            height: sigHeight,
+          });
+        } else if (field.type === 'text' || field.type === 'date') {
+          let text = '';
+          const labelLower = field.label.toLowerCase();
+          if (labelLower.includes('nome') || labelLower.includes('name')) text = formData.nome || '';
+          else if (labelLower.includes('codice fiscale') || labelLower.includes('cf')) text = formData.cf || '';
+          else if (labelLower.includes('data') || labelLower.includes('date')) text = formData.dataNascita || new Date().toLocaleDateString();
+          else text = formData[field.id] || formData[field.label] || '';
+
+          if (text) {
+            page.drawText(text, {
+              x,
+              y,
+              size: field.fontSize || 12,
+            });
+          }
+        }
+      }
+
+      const pdfBytes = await pdfDoc.saveAsBase64({ dataUri: true });
+      return pdfBytes;
+    } catch (error) {
+      console.error("PDF Generation Error:", error);
+      throw error;
+    }
+  };
+
+  const handleSaveEditedPerson = () => {
+    if (!editingPerson) return;
+    setData(prev => ({
+      ...prev,
+      people: prev.people.map(p => p.id === editingPerson.id ? editingPerson : p)
+    }));
+    setEditingPerson(null);
   };
 
   const handleSyncTally = async () => {
-    if (!selectedProdId) return;
+    if (!selectedProdId || !activeProduction) return;
+    
+    const formLink = activeProduction.formLink || '';
+    const formIdMatch = formLink.match(/tally\.so\/r\/([^?]+)/);
+    const formId = formIdMatch ? formIdMatch[1] : null;
+
+    if (!formId) {
+      alert("Configura un link Tally valido (es. https://tally.so/r/ID) nelle impostazioni della produzione.");
+      setIsSettingsModalOpen(true);
+      return;
+    }
+
     setIsSyncingTally(true);
     try {
-      const res = await fetch(`/api/tally/status?pid=${selectedProdId}`);
-      if (!res.ok) throw new Error("Errore durante la sincronizzazione manuale");
+      const res = await fetch('/api/tally/sync-submissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ formId, people: prodPeople })
+      });
       
-      const deliveries = await res.json();
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Errore durante la sincronizzazione con Tally");
+      }
       
+      const { matchedSubmissions } = await res.json();
+      
+      if (!matchedSubmissions || matchedSubmissions.length === 0) {
+        alert("Nessuna nuova sottomissione trovata per i membri attuali.");
+        return;
+      }
+
+      let updatedPeople = [...data.people];
+      let updatedInstances = [...data.instances];
+      let newNotifications = [...data.notifications];
+
+      for (const sub of matchedSubmissions) {
+        const personId = sub.personId;
+        const person = updatedPeople.find(p => p.id === personId);
+        if (!person) continue;
+
+        // Update person deliveredAt
+        if (!person.deliveredAt) {
+          person.deliveredAt = sub.submittedAt;
+        }
+
+        // Find pending document instances for this person
+        const pendingInstances = updatedInstances.filter(
+          inst => inst.personId === personId && inst.status !== DocStatus.SIGNED
+        );
+
+        for (const instance of pendingInstances) {
+          const template = data.templates.find(t => t.id === instance.templateId);
+          if (!template) continue;
+
+          // Generate PDF
+          try {
+            const finalPdfBase64 = await generateFilledPdf(template, sub.formData, sub.signatureUrl);
+            
+            // Upload PDF to Vercel Blob
+            const uploadRes = await fetch('/api/upload-pdf', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                base64Pdf: finalPdfBase64,
+                filename: `${person.name.replace(/\s+/g, '_')}_${template.name.replace(/\s+/g, '_')}.pdf`
+              })
+            });
+            
+            let finalPdfUrl = '';
+            if (uploadRes.ok) {
+              const uploadData = await uploadRes.json();
+              finalPdfUrl = uploadData.url;
+            } else {
+              console.error("Failed to upload PDF to Blob");
+              // Fallback to base64 if upload fails, though it might break localStorage
+              finalPdfUrl = finalPdfBase64;
+            }
+            
+            // Update instance
+            instance.status = DocStatus.SIGNED;
+            instance.signedAt = sub.submittedAt;
+            instance.finalPdfUrl = finalPdfUrl;
+            instance.auditJSON = JSON.stringify({
+              submittedAt: sub.submittedAt,
+              userAgent: 'Tally.so Sync',
+              formData: sub.formData
+            });
+
+            // Add notification
+            newNotifications.push({
+              id: crypto.randomUUID(),
+              productionId: selectedProdId,
+              personId: personId,
+              documentInstanceId: instance.id,
+              type: 'DOCUMENT_SIGNED',
+              title: 'Nuovo documento firmato',
+              message: `${person.name} ha firmato ${template.name} tramite Tally`,
+              createdAt: new Date().toISOString(),
+              readAt: null
+            });
+
+          } catch (pdfErr) {
+            console.error("Errore generazione PDF per", person.name, pdfErr);
+          }
+        }
+      }
+
       setData(prev => ({
         ...prev,
-        people: prev.people.map(p => {
-          if (p.productionId === selectedProdId) {
-            const delivery = deliveries.find((d: any) => d.mid === p.id);
-            if (delivery) return { ...p, deliveredAt: delivery.deliveredAt };
-          }
-          return p;
-        })
+        people: updatedPeople,
+        instances: updatedInstances,
+        notifications: newNotifications
       }));
 
-      alert(`Sincronizzazione completata.`);
+      alert(`Sincronizzazione completata: ${matchedSubmissions.length} sottomissioni elaborate.`);
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -277,69 +475,144 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file || !selectedProdId) return;
 
-    if (file.name.toLowerCase().endsWith('.pdf')) {
-      alert("PDF import non ancora supportato: carica un DOCX oppure converti il PDF in DOCX.");
-      if (docxInputRef.current) docxInputRef.current.value = '';
-      return;
-    }
-
+    setIsParsingDoc(true);
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const { value: html } = await mammoth.convertToHtml({ arrayBuffer });
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      const table = doc.querySelector('table');
-      if (!table) { alert("Nessuna tabella trovata."); return; }
-      const rows = Array.from(table.querySelectorAll('tr'));
-      let headerIdx = -1;
-      let colMap: Record<string, number> = {};
-      for (let i = 0; i < Math.min(rows.length, 5); i++) {
-        const cells = Array.from(rows[i].querySelectorAll('td')).map(td => td.textContent?.trim().toUpperCase() || '');
-        if (cells.includes('REPARTI') && cells.includes('NOME') && cells.includes('RUOLO')) {
-          headerIdx = i;
-          cells.forEach((cell, idx) => {
-            if (cell.includes('REPARTI')) colMap['REPARTI'] = idx;
-            if (cell.includes('NOME')) colMap['NOME'] = idx;
-            if (cell.includes('RUOLO')) colMap['RUOLO'] = idx;
-            if (cell.includes('NUMERO')) colMap['NUMERO'] = idx;
+      let parsedMembers: any[] = [];
+
+      if (file.name.toLowerCase().endsWith('.pdf')) {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        await new Promise<void>((resolve, reject) => {
+          reader.onload = async () => {
+            try {
+              const base64Data = (reader.result as string).split(',')[1];
+              
+              const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+              
+              const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: [
+                  {
+                    inlineData: {
+                      data: base64Data,
+                      mimeType: file.type || 'application/pdf'
+                    }
+                  },
+                  "Estrai la lista della troupe da questo documento. Ritorna un array JSON di oggetti, dove ogni oggetto rappresenta una persona. I campi devono essere: 'name' (stringa, Nome e Cognome), 'role' (stringa, Ruolo), 'phone' (stringa, Numero di telefono, solo cifre e + se presente), 'department' (stringa, Reparto, es. PRODUZIONE, REGIA, FOTOGRAFIA, ecc. Deducilo dalle intestazioni della tabella o dalle sezioni). Ignora le righe vuote o senza il nome della persona."
+                ],
+                config: {
+                  responseMimeType: "application/json",
+                  responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        role: { type: Type.STRING },
+                        phone: { type: Type.STRING },
+                        department: { type: Type.STRING }
+                      },
+                      required: ["name", "role", "phone", "department"]
+                    }
+                  }
+                }
+              });
+
+              const text = response.text;
+              if (!text) throw new Error("Nessuna risposta dall'IA");
+              
+              const data = JSON.parse(text);
+              parsedMembers = data || [];
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          };
+          reader.onerror = (error) => reject(error);
+        });
+      } else {
+        // DOCX parsing via mammoth
+        const arrayBuffer = await file.arrayBuffer();
+        const { value: html } = await mammoth.convertToHtml({ arrayBuffer });
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const table = doc.querySelector('table');
+        if (!table) throw new Error("Nessuna tabella trovata nel DOCX.");
+        const rows = Array.from(table.querySelectorAll('tr'));
+        let headerIdx = -1;
+        let colMap: Record<string, number> = {};
+        for (let i = 0; i < Math.min(rows.length, 5); i++) {
+          const cells = Array.from(rows[i].querySelectorAll('td')).map(td => td.textContent?.trim().toUpperCase() || '');
+          if (cells.includes('REPARTI') && cells.includes('NOME') && cells.includes('RUOLO')) {
+            headerIdx = i;
+            cells.forEach((cell, idx) => {
+              if (cell.includes('REPARTI')) colMap['REPARTI'] = idx;
+              if (cell.includes('NOME')) colMap['NOME'] = idx;
+              if (cell.includes('RUOLO')) colMap['RUOLO'] = idx;
+              if (cell.includes('NUMERO')) colMap['NUMERO'] = idx;
+            });
+            break;
+          }
+        }
+        if (headerIdx === -1) throw new Error("Header non trovato nel DOCX.");
+        
+        let currentDept = 'Generale';
+        for (let i = headerIdx + 1; i < rows.length; i++) {
+          const cells = Array.from(rows[i].querySelectorAll('td')).map(td => td.textContent?.trim() || '');
+          const nome = cells[colMap['NOME']] || '';
+          const ruolo = cells[colMap['RUOLO']] || '';
+          const numero = cells[colMap['NUMERO']] || '';
+          const reparti = cells[colMap['REPARTI']] || '';
+          if (reparti && !nome && !ruolo && !numero) { currentDept = reparti; continue; }
+          if (!nome) continue;
+          
+          parsedMembers.push({
+            name: nome,
+            role: ruolo,
+            department: currentDept,
+            phone: numero
           });
-          break;
         }
       }
-      if (headerIdx === -1) { alert("Header non trovato."); return; }
+
+      // Process parsed members (both PDF and DOCX)
       const members: any[] = [];
       let duplicatesCount = 0;
-      let currentDept = 'Generale';
-      for (let i = headerIdx + 1; i < rows.length; i++) {
-        const cells = Array.from(rows[i].querySelectorAll('td')).map(td => td.textContent?.trim() || '');
-        const nome = cells[colMap['NOME']] || '';
-        const ruolo = cells[colMap['RUOLO']] || '';
-        const numero = cells[colMap['NUMERO']] || '';
-        const reparti = cells[colMap['REPARTI']] || '';
-        if (reparti && !nome && !ruolo && !numero) { currentDept = reparti; continue; }
-        if (!nome) continue;
-        const cleanPhone = numero.replace(/[^\d+]/g, '');
-        const isDuplicate = data.people.some(p => p.productionId === selectedProdId && !p.removedAt && p.name.toLowerCase() === nome.toLowerCase());
-        if (isDuplicate) { duplicatesCount++; continue; }
+      
+      for (const p of parsedMembers) {
+        if (!p.name) continue;
+        const cleanPhone = (p.phone || '').replace(/[^\d+]/g, '');
+        const isDuplicate = data.people.some(existing => existing.productionId === selectedProdId && !existing.removedAt && existing.name.toLowerCase() === p.name.toLowerCase());
+        
+        if (isDuplicate) { 
+          duplicatesCount++; 
+          continue; 
+        }
+        
         members.push({
           id: 'per-' + Math.random().toString(36).substr(2, 9),
           productionId: selectedProdId,
-          name: nome,
-          role: ruolo,
-          department: currentDept,
+          name: p.name,
+          role: p.role || 'Crew',
+          department: p.department || 'Generale',
           whatsapp: cleanPhone,
           hubToken: crypto.randomUUID()
         });
       }
-      setDocxParsedData({ members, duplicates: duplicatesCount });
-      setIsDocxPreviewModalOpen(true);
-    } catch (err) { alert("Errore lettura file."); }
-    if (docxInputRef.current) docxInputRef.current.value = '';
-  };
 
-  const handleConfirmDocxImport = () => {
-    setData(prev => ({ ...prev, people: [...prev.people, ...docxParsedData.members] }));
-    setIsDocxPreviewModalOpen(false);
+      if (members.length > 0) {
+        setData(prev => ({ ...prev, people: [...prev.people, ...members] }));
+        alert(`Importazione completata: ${members.length} membri aggiunti.${duplicatesCount > 0 ? ` (${duplicatesCount} duplicati ignorati)` : ''}`);
+      } else {
+        alert(`Nessun nuovo membro trovato.${duplicatesCount > 0 ? ` (${duplicatesCount} duplicati ignorati)` : ''}`);
+      }
+
+    } catch (err: any) { 
+      alert(err.message || "Errore lettura file."); 
+    } finally {
+      setIsParsingDoc(false);
+      if (docxInputRef.current) docxInputRef.current.value = '';
+    }
   };
 
   const handleCreateProduction = () => {
@@ -540,8 +813,8 @@ const App: React.FC = () => {
                   <button onClick={() => setIsRecipientModalOpen(true)} className="px-6 py-4 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-600/20 flex items-center gap-2 transition-all">
                     <Send className="w-4 h-4" /> INVIA MODULO
                   </button>
-                  <button onClick={() => docxInputRef.current?.click()} className="px-6 py-4 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 dark:hover:bg-white/10 flex items-center gap-2 transition-all">
-                    <FileCode className="w-4 h-4" /> IMPORTA DOCX/PDF
+                  <button onClick={() => docxInputRef.current?.click()} disabled={isParsingDoc} className="px-6 py-4 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 dark:hover:bg-white/10 flex items-center gap-2 transition-all disabled:opacity-50">
+                    {isParsingDoc ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileCode className="w-4 h-4" />} IMPORTA DOCX/PDF
                   </button>
                   <button onClick={() => setIsNewMemberModalOpen(true)} className="px-6 py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 flex items-center gap-2 transition-all">
                     <UserPlus className="w-4 h-4" /> Nuovo Membro
@@ -552,7 +825,7 @@ const App: React.FC = () => {
 
               <div className="space-y-3">
                 {prodPeople.map(p => (
-                  <div key={p.id} className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm flex items-center justify-between gap-4 hover:border-indigo-500/30 transition-all">
+                  <div key={p.id} onClick={() => setEditingPerson(p)} className="cursor-pointer bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm flex items-center justify-between gap-4 hover:border-indigo-500/30 transition-all">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-1">
                         <h4 className="font-black text-sm truncate text-slate-900 dark:text-white">{p.name}</h4>
@@ -569,9 +842,11 @@ const App: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-2">
                       {!p.deliveredAt && (
-                        <button type="button" onClick={() => handleSendWhatsApp(p)} className="p-2.5 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-xl transition-colors"><Send className="w-5 h-5 pointer-events-none" /></button>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); handleSendWhatsApp(p); }} className="p-2.5 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-xl transition-colors">
+                          {p.sentAt ? <Check className="w-5 h-5 pointer-events-none" /> : <Send className="w-5 h-5 pointer-events-none" />}
+                        </button>
                       )}
-                      <button type="button" onClick={(e) => handleDeletePerson(p.id, e)} className="relative z-10 p-2.5 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-colors">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); handleDeletePerson(p.id, e); }} className="relative z-10 p-2.5 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-colors">
                         <Trash2 className="w-5 h-5 pointer-events-none" />
                       </button>
                     </div>
@@ -605,7 +880,7 @@ const App: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-3">
                       <button type="button" onClick={() => handleSendWhatsApp(p)} className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2">
-                        <Send className="w-3.5 h-3.5 pointer-events-none" /> Sollecita
+                        {p.sentAt ? <Check className="w-3.5 h-3.5 pointer-events-none" /> : <Send className="w-3.5 h-3.5 pointer-events-none" />} Sollecita
                       </button>
                     </div>
                   </div>
@@ -725,16 +1000,35 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
             <h3 className="text-2xl font-black mb-6 text-slate-900 dark:text-white">Invia Modulo</h3>
+            
             <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-2">
               {pendingPeople.map(p => (
                 <button key={p.id} type="button" onClick={() => handleSendWhatsApp(p)} className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl hover:border-emerald-500 transition-all">
                   <div className="text-left"><p className="font-bold text-slate-900 dark:text-white">{p.name}</p><p className="text-[10px] uppercase text-slate-400 font-black">{p.role}</p></div>
-                  <Send className="w-4 h-4 text-emerald-600 pointer-events-none" />
+                  {p.sentAt ? <Check className="w-4 h-4 text-emerald-600 pointer-events-none" /> : <Send className="w-4 h-4 text-emerald-600 pointer-events-none" />}
                 </button>
               ))}
               {pendingPeople.length === 0 && <p className="text-center py-10 text-slate-400 font-medium italic">Nessun membro in attesa.</p>}
             </div>
             <button type="button" onClick={() => setIsRecipientModalOpen(false)} className="w-full mt-6 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-bold uppercase text-[10px] tracking-widest font-black">Chiudi</button>
+          </div>
+        </div>
+      )}
+
+      {editingPerson && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
+            <h3 className="text-2xl font-black mb-8 text-slate-900 dark:text-white">Modifica Membro</h3>
+            <div className="space-y-4">
+              <input value={editingPerson.name} onChange={e => setEditingPerson({...editingPerson, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Nome e Cognome" />
+              <input value={editingPerson.role} onChange={e => setEditingPerson({...editingPerson, role: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Ruolo" />
+              <input value={editingPerson.department} onChange={e => setEditingPerson({...editingPerson, department: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Reparto" />
+              <input value={editingPerson.whatsapp} onChange={e => setEditingPerson({...editingPerson, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Numero WhatsApp" />
+              <div className="flex gap-4 pt-4">
+                <button type="button" onClick={() => setEditingPerson(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
+                <button type="button" onClick={handleSaveEditedPerson} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Salva</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -766,27 +1060,6 @@ const App: React.FC = () => {
                 <button type="button" onClick={() => setIsNewMemberModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
                 <button type="button" onClick={handleAddMember} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Aggiungi</button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isDocxPreviewModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl border border-white/10">
-            <h3 className="text-2xl font-black mb-4 text-slate-900 dark:text-white">Preview DOCX</h3>
-            <p className="mb-6 text-sm text-slate-500">Trovati {docxParsedData.members.length} nuovi membri.</p>
-            <div className="max-h-60 overflow-y-auto custom-scrollbar border border-slate-200 dark:border-white/10 rounded-2xl p-4 mb-6">
-              {docxParsedData.members.map((m, i) => (
-                <div key={i} className="py-2 border-b last:border-none border-slate-100 dark:border-white/5 flex justify-between text-xs">
-                  <span className="font-bold text-slate-900 dark:text-white">{m.name}</span>
-                  <span className="uppercase text-slate-400 font-black">{m.role}</span>
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-4">
-              <button type="button" onClick={() => setIsDocxPreviewModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
-              <button type="button" onClick={handleConfirmDocxImport} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Importa Tutti</button>
             </div>
           </div>
         </div>

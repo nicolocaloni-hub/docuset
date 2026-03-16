@@ -58,6 +58,7 @@ export interface Person {
   intolerances?: string;
   hasCar?: boolean;
   deliveredAt?: string; // Data di consegna dal form Tally
+  sentAt?: string; // Data di invio link WhatsApp
 }
 
 export interface Production {
