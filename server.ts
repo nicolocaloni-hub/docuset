@@ -3,7 +3,6 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 
 // Import all API handlers
-import sendBatchHandler from './api/whatsapp/send-batch.js';
 import whatsappWebhookHandler from './api/whatsapp/webhook.js';
 import submissionsHandler from './api/submissions.js';
 import requestValidateHandler from './api/request/validate.js';
@@ -17,7 +16,6 @@ import tallySubmissionsHandler from './api/tally/submissions.js';
 import tallySyncSubmissionsHandler from './api/tally/sync-submissions.js';
 import templateUploadHandler from './api/template/upload.js';
 import uploadPdfHandler from './api/upload-pdf.js';
-import parseCrewHandler from './api/parse-crew.js';
 
 async function startServer() {
   const app = express();
@@ -28,7 +26,6 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Mount API routes
-  app.all('/api/whatsapp/send-batch', sendBatchHandler as any);
   app.all('/api/whatsapp/webhook', whatsappWebhookHandler as any);
   app.all('/api/submissions', submissionsHandler as any);
   app.all('/api/request/validate', requestValidateHandler as any);
@@ -42,7 +39,6 @@ async function startServer() {
   app.all('/api/tally/sync-submissions', tallySyncSubmissionsHandler as any);
   app.all('/api/template/upload', templateUploadHandler as any);
   app.all('/api/upload-pdf', uploadPdfHandler as any);
-  app.all('/api/parse-crew', parseCrewHandler as any);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
