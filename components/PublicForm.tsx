@@ -48,7 +48,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
   useEffect(() => {
     const validateToken = async () => {
       try {
-        const res = await fetch(`/api/sign/validate?token=${hubToken}`);
+        const res = await fetch(`/api/sign?action=validate&token=${hubToken}`);
         if (!res.ok) {
           const err = await res.json();
           setValidationError(err.error || "Link non valido.");
@@ -116,7 +116,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
     } else {
       setIsSubmitting(true);
       try {
-        const res = await fetch('/api/sign/submit', {
+        const res = await fetch('/api/sign?action=submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

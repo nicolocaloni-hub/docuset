@@ -19,7 +19,6 @@ import {
 } from './types';
 import SignatureCanvasComponent from './components/SignatureCanvas';
 import PublicForm from './components/PublicForm';
-import ExternalSubmitForm from './components/ExternalSubmitForm';
 // @ts-ignore
 import mammoth from 'mammoth';
 
@@ -133,7 +132,7 @@ const App: React.FC = () => {
 
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`/api/tally/status?pid=${selectedProdId}`);
+        const res = await fetch(`/api/tally?action=status&pid=${selectedProdId}`);
         if (!res.ok) return;
         const deliveries = await res.json();
 
@@ -341,7 +340,7 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
 
     setIsSyncingTally(true);
     try {
-      const res = await fetch('/api/tally/sync-submissions', {
+      const res = await fetch('/api/tally?action=sync-submissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ formId, people: prodPeople })
