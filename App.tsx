@@ -93,6 +93,8 @@ const App: React.FC = () => {
   const [isProdListOpen, setIsProdListOpen] = useState(false);
   const [isParsingDoc, setIsParsingDoc] = useState(false);
   const [isSyncingTally, setIsSyncingTally] = useState(false);
+  const [pendingImportMembers, setPendingImportMembers] = useState<Person[] | null>(null);
+  const [editingPendingMember, setEditingPendingMember] = useState<Person | null>(null);
 
   // Modal State for deletions
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'person' | 'template' | 'production', id: string, name: string } | null>(null);
@@ -307,6 +309,21 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
       people: prev.people.map(p => p.id === editingPerson.id ? editingPerson : p)
     }));
     setEditingPerson(null);
+  };
+
+  const handleSaveEditedPendingMember = () => {
+    if (!editingPendingMember || !pendingImportMembers) return;
+    setPendingImportMembers(prev => 
+      prev ? prev.map(p => p.id === editingPendingMember.id ? editingPendingMember : p) : null
+    );
+    setEditingPendingMember(null);
+  };
+
+  const handleConfirmImport = () => {
+    if (!pendingImportMembers) return;
+    setData(prev => ({ ...prev, people: [...prev.people, ...pendingImportMembers] }));
+    setPendingImportMembers(null);
+    alert(`Importazione confermata: ${pendingImportMembers.length} membri aggiunti.`);
   };
 
   const handleSyncTally = async () => {
@@ -601,8 +618,10 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
       }
 
       if (members.length > 0) {
-        setData(prev => ({ ...prev, people: [...prev.people, ...members] }));
-        alert(`Importazione completata: ${members.length} membri aggiunti.${duplicatesCount > 0 ? ` (${duplicatesCount} duplicati ignorati)` : ''}`);
+        setPendingImportMembers(members);
+        if (duplicatesCount > 0) {
+          alert(`Trovati ${members.length} nuovi membri. ${duplicatesCount} duplicati ignorati.`);
+        }
       } else {
         alert(`Nessun nuovo membro trovato.${duplicatesCount > 0 ? ` (${duplicatesCount} duplicati ignorati)` : ''}`);
       }
@@ -1059,6 +1078,60 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setIsNewMemberModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
                 <button type="button" onClick={handleAddMember} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Aggiungi</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingImportMembers && !editingPendingMember && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl border border-white/10 max-h-[90vh] flex flex-col">
+            <h3 className="text-2xl font-black mb-2 text-slate-900 dark:text-white">Revisione Membri</h3>
+            <p className="text-slate-500 text-sm mb-6 font-medium">Controlla i membri estratti. Clicca su un membro per modificarne i dettagli prima di confermare l'importazione.</p>
+            
+            <div className="space-y-2 overflow-y-auto custom-scrollbar pr-2 flex-1 min-h-0">
+              {pendingImportMembers.map(p => (
+                <button key={p.id} type="button" onClick={() => setEditingPendingMember(p)} className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl hover:border-indigo-500 transition-all text-left group">
+                  <div>
+                    <p className="font-bold text-slate-900 dark:text-white">{p.name}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[10px] uppercase text-slate-400 font-black">{p.role}</span>
+                      <span className="text-[10px] text-slate-300 dark:text-slate-600">•</span>
+                      <span className="text-[10px] uppercase text-slate-400 font-black">{p.department}</span>
+                      {p.whatsapp && (
+                        <>
+                          <span className="text-[10px] text-slate-300 dark:text-slate-600">•</span>
+                          <span className="text-[10px] uppercase text-slate-400 font-black">{p.whatsapp}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <Edit2 className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors" />
+                </button>
+              ))}
+            </div>
+            
+            <div className="flex gap-4 pt-6 mt-auto">
+              <button type="button" onClick={() => setPendingImportMembers(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
+              <button type="button" onClick={handleConfirmImport} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Conferma Importazione</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingPendingMember && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
+            <h3 className="text-2xl font-black mb-8 text-slate-900 dark:text-white">Correggi Membro</h3>
+            <div className="space-y-4">
+              <input value={editingPendingMember.name} onChange={e => setEditingPendingMember({...editingPendingMember, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Nome e Cognome" />
+              <input value={editingPendingMember.role} onChange={e => setEditingPendingMember({...editingPendingMember, role: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Ruolo" />
+              <input value={editingPendingMember.department} onChange={e => setEditingPendingMember({...editingPendingMember, department: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Reparto" />
+              <input value={editingPendingMember.whatsapp} onChange={e => setEditingPendingMember({...editingPendingMember, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Numero WhatsApp" />
+              <div className="flex gap-4 pt-4">
+                <button type="button" onClick={() => setEditingPendingMember(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
+                <button type="button" onClick={handleSaveEditedPendingMember} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Salva Modifiche</button>
               </div>
             </div>
           </div>
