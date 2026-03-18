@@ -135,6 +135,13 @@ const App: React.FC = () => {
       try {
         const res = await fetch(`/api/tally?action=status&pid=${selectedProdId}`);
         if (!res.ok) return;
+        
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          console.error('Expected JSON, got:', contentType);
+          return;
+        }
+
         const deliveries = await res.json();
 
         if (Array.isArray(deliveries) && deliveries.length > 0) {
@@ -409,11 +416,13 @@ ricordati di firmare i documenti necessari per il set.`;
         if (person) submissionsToProcess.push({ person, sub });
       }
 
+      const normalizeName = (n: string) => n ? n.toLowerCase().trim().replace(/\s+/g, ' ') : '';
+
       // Add unmatched (create new people)
       for (const sub of (unmatchedSubmissions || [])) {
         // Try to find by name again just in case
         const nome = sub.formData.nome || sub.formData['Nome e Cognome'] || sub.formData['nome e cognome'] || 'Sconosciuto';
-        let person = updatedPeople.find(p => p.productionId === selectedProdId && p.name.toLowerCase() === nome.toLowerCase());
+        let person = updatedPeople.find(p => p.productionId === selectedProdId && normalizeName(p.name) === normalizeName(nome));
         
         if (!person) {
           person = {
@@ -986,23 +995,44 @@ ricordati di firmare i documenti necessari per il set.`;
                           <h5 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">Dati Inseriti</h5>
                           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                             {Object.entries(formData).map(([key, value]) => {
-                              if (key === 'Firma' || !value) return null;
+                              const lowerKey = key.toLowerCase();
+                              const strValue = String(value);
+                              
+                              // Hide unwanted fields
+                              if (
+                                !value || 
+                                lowerKey === 'nome e cognome' || 
+                                lowerKey === 'pid' || 
+                                lowerKey === 'mid' || 
+                                lowerKey === 'data emissione' || 
+                                lowerKey === 'data di emissione' || 
+                                lowerKey === 'scadenza'
+                              ) return null;
+
+                              // Check if it's a signature/file link
+                              const isFirma = lowerKey.includes('firma') || lowerKey.includes('signature') || strValue.includes('storage.tally.so');
+
                               return (
                                 <div key={key} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-white/5">
                                   <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider mb-1">{key}</p>
-                                  <p className="text-sm font-medium text-slate-900 dark:text-white truncate" title={String(value)}>{String(value)}</p>
+                                  {isFirma ? (
+                                    <a 
+                                      href={strValue} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      download="firma.jpg"
+                                      className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-500/20 transition-colors"
+                                    >
+                                      <Download className="w-3.5 h-3.5" /> Scarica Firma
+                                    </a>
+                                  ) : (
+                                    <p className="text-sm font-medium text-slate-900 dark:text-white truncate" title={strValue}>{strValue}</p>
+                                  )}
                                 </div>
                               );
                             })}
                           </div>
-                          {formData['Firma'] && (
-                            <div className="mt-6">
-                              <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider mb-2">Firma</p>
-                              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl p-4 inline-block">
-                                <img src={formData['Firma']} alt="Firma" className="max-h-24 object-contain" referrerPolicy="no-referrer" />
-                              </div>
-                            </div>
-                          )}
+                          {/* Removed the old hardcoded Firma image block since it's now handled in the loop */}
                         </div>
                       )}
                     </div>

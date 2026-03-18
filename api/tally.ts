@@ -138,11 +138,13 @@ export default async function handler(req: any, res: any) {
 
         let signatureBase64 = '';
 
+        const normalizeName = (n: string) => n ? n.toLowerCase().trim().replace(/\s+/g, ' ') : '';
+
         let matchedPerson = null;
         if (personId) {
           matchedPerson = people.find((p: any) => p.id === personId);
         } else if (nome) {
-          matchedPerson = people.find((p: any) => p.name.toLowerCase() === nome.toLowerCase());
+          matchedPerson = people.find((p: any) => normalizeName(p.name) === normalizeName(nome));
         }
 
         const formData = { nome, cf, dataNascita, ...fullFormData };
