@@ -3,6 +3,7 @@ import { Buffer } from 'buffer';
 
 export default async function handler(req: any, res: any) {
   const { action } = req.query;
+  console.log('TALLY HANDLER CALLED:', req.method, req.url, req.query);
 
   if (req.method === 'GET' && action === 'status') {
     const { pid } = req.query;
@@ -35,7 +36,9 @@ export default async function handler(req: any, res: any) {
 
   if (req.method === 'POST' && action === 'sync-submissions') {
     const { formId, people } = req.body;
-    const apiKey = process.env.TALLY_API_KEY;
+    const apiKey = process.env.TALLY_API_KEY || 'tly-NIisX4KElWrBp76sprlB5qvjwznN8oJV';
+    
+    console.log('API KEY IS:', apiKey);
 
     if (!formId) return res.status(400).json({ error: 'Missing formId' });
     if (!apiKey) return res.status(500).json({ error: "Chiave API di Tally mancante. Devi configurare la variabile di ambiente TALLY_API_KEY nei settings dell'applicazione." });
@@ -65,8 +68,15 @@ export default async function handler(req: any, res: any) {
         }
 
         const data = await response.json();
-        const submissions = data.data || [];
-        allSubmissions = [...allSubmissions, ...submissions];
+        const submissions = data.submissions || [];
+        const questions = data.questions || [];
+        
+        const submissionsWithQuestions = submissions.map((sub: any) => ({
+          ...sub,
+          _questions: questions
+        }));
+        
+        allSubmissions = [...allSubmissions, ...submissionsWithQuestions];
 
         if (data.meta && data.meta.nextCursor) {
           nextCursor = data.meta.nextCursor;
@@ -76,7 +86,8 @@ export default async function handler(req: any, res: any) {
       }
 
       const processedSubmissions = await Promise.all(allSubmissions.map(async (sub: any) => {
-        const fields = sub.fields || [];
+        const responses = sub.responses || [];
+        const questions = sub._questions || [];
         
         let nome = '';
         let cf = '';
@@ -86,22 +97,37 @@ export default async function handler(req: any, res: any) {
         
         const fullFormData: Record<string, any> = {};
 
-        for (const field of fields) {
-          const label = (field.label || '').toLowerCase();
-          const key = (field.key || '').toLowerCase();
-          const val = field.value;
+        for (const response of responses) {
+          const question = questions.find((q: any) => q.id === response.questionId);
+          if (!question) continue;
+
+          const label = (question.title || '').toLowerCase();
+          const type = question.type;
+          let val = response.answer;
           
-          if (field.label) {
-            fullFormData[field.label] = val;
-          }
-          
-          if (key === 'personid' || label.includes('personid') || key === 'mid' || label === 'mid') personId = val;
-          else if (label.includes('nome') || label.includes('name')) nome = val;
-          else if (label.includes('codice fiscale') || label.includes('cf')) cf = val;
-          else if (label.includes('data di nascita') || label.includes('birth')) dataNascita = val;
-          else if (field.type === 'SIGNATURE' || label.includes('firma') || label.includes('signature')) {
-            signatureUrl = Array.isArray(val) ? val[0]?.url : val;
-            fullFormData[field.label || 'Firma'] = signatureUrl;
+          if (type === 'HIDDEN_FIELDS' && typeof val === 'object' && val !== null) {
+            for (const [key, value] of Object.entries(val)) {
+              fullFormData[key] = value;
+              const lowerKey = key.toLowerCase();
+              if (lowerKey === 'pid' || lowerKey === 'mid' || lowerKey.includes('personid')) {
+                personId = String(value);
+              }
+            }
+          } else {
+            if (question.title) {
+              fullFormData[question.title] = val;
+            }
+            
+            if (label.includes('nome') || label.includes('name')) {
+              nome = String(val);
+            } else if (label.includes('codice fiscale') || label.includes('cf')) {
+              cf = String(val);
+            } else if (label.includes('data di nascita') || label.includes('birth')) {
+              dataNascita = String(val);
+            } else if (type === 'SIGNATURE' || label.includes('firma') || label.includes('signature')) {
+              signatureUrl = Array.isArray(val) ? val[0]?.url : val;
+              fullFormData[question.title || 'Firma'] = signatureUrl;
+            }
           }
         }
 
