@@ -80,7 +80,7 @@ const App: React.FC = () => {
   const signMatch = path.match(/^\/sign\/([^/]+)$/);
   const publicToken = signMatch ? signMatch[1] : null;
 
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PRODUCTIONS' | 'PEOPLE' | 'TEMPLATES' | 'ARCHIVE' | 'PENDING' | 'REQUESTS'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PRODUCTIONS' | 'PEOPLE' | 'TEMPLATES' | 'ARCHIVE' | 'PENDING' | 'REQUESTS' | 'SIGNED'>('DASHBOARD');
   const [selectedProdId, setSelectedProdId] = useState<string | null>(data.productions[0]?.id || null);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -94,6 +94,7 @@ const App: React.FC = () => {
   const [isSyncingTally, setIsSyncingTally] = useState(false);
   const [pendingImportMembers, setPendingImportMembers] = useState<Person[] | null>(null);
   const [editingPendingMember, setEditingPendingMember] = useState<Person | null>(null);
+  const [expandedSignedPersonId, setExpandedSignedPersonId] = useState<string | null>(null);
 
   // Modal State for deletions
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'person' | 'template' | 'production', id: string, name: string } | null>(null);
@@ -163,6 +164,7 @@ const App: React.FC = () => {
   const activeProduction = useMemo(() => data.productions.find(p => p.id === selectedProdId), [selectedProdId, data.productions]);
   const prodPeople = useMemo(() => data.people.filter(p => p.productionId === selectedProdId && !p.removedAt), [selectedProdId, data.people]);
   const pendingPeople = useMemo(() => prodPeople.filter(p => !p.deliveredAt), [prodPeople]);
+  const signedPeople = useMemo(() => prodPeople.filter(p => p.deliveredAt), [prodPeople]);
   const prodTemplates = useMemo(() => data.templates, [data.templates]);
 
   useEffect(() => {
@@ -231,6 +233,42 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
         )
       }));
     }
+  };
+
+  const handleSollecitaWhatsApp = async (p: Person) => {
+    const baseUrl = activeProduction?.formLink;
+    if (!baseUrl) {
+      alert("Configura il link Tally nelle impostazioni della produzione.");
+      setIsSettingsModalOpen(true);
+      return;
+    }
+
+    let finalLink = baseUrl;
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    finalLink += `${separator}pid=${selectedProdId}&mid=${p.id}`;
+    const personName = p.name.split(' ')[0];
+
+    const message = `Ciao ${personName},
+${finalLink}
+ricordati di firmare i documenti necessari per il set.`;
+
+    const phone = p.whatsapp.replace(/[^\d+]/g, '');
+    
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    let url = '';
+    if (isAndroid) {
+      url = `intent://send?phone=${phone}&text=${encodeURIComponent(message)}#Intent;package=com.whatsapp;scheme=whatsapp;end;`;
+    } else {
+      url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+    }
+    
+    window.open(url, '_blank');
+    setData(prev => ({
+      ...prev,
+      people: prev.people.map(person => 
+        person.id === p.id ? { ...person, solicitedAt: new Date().toISOString() } : person
+      )
+    }));
   };
 
   const generateFilledPdf = async (template: Template, formData: any, signatureUrl: string) => {
@@ -351,10 +389,11 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
         throw new Error(errData.error || "Errore durante la sincronizzazione con Tally");
       }
       
-      const { matchedSubmissions } = await res.json();
+      const { matchedSubmissions, unmatchedSubmissions } = await res.json();
       
-      if (!matchedSubmissions || matchedSubmissions.length === 0) {
-        alert("Nessuna nuova sottomissione trovata per i membri attuali.");
+      if ((!matchedSubmissions || matchedSubmissions.length === 0) && (!unmatchedSubmissions || unmatchedSubmissions.length === 0)) {
+        alert("Nessuna sottomissione trovata su Tally.");
+        setIsSyncingTally(false);
         return;
       }
 
@@ -362,77 +401,58 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
       let updatedInstances = [...data.instances];
       let newNotifications = [...data.notifications];
 
-      for (const sub of matchedSubmissions) {
-        const personId = sub.personId;
-        const person = updatedPeople.find(p => p.id === personId);
-        if (!person) continue;
+      const submissionsToProcess: { person: Person, sub: any }[] = [];
 
-        // Update person deliveredAt
+      // Add matched
+      for (const sub of (matchedSubmissions || [])) {
+        const person = updatedPeople.find(p => p.id === sub.personId);
+        if (person) submissionsToProcess.push({ person, sub });
+      }
+
+      // Add unmatched (create new people)
+      for (const sub of (unmatchedSubmissions || [])) {
+        // Try to find by name again just in case
+        const nome = sub.formData.nome || sub.formData['Nome e Cognome'] || sub.formData['nome e cognome'] || 'Sconosciuto';
+        let person = updatedPeople.find(p => p.productionId === selectedProdId && p.name.toLowerCase() === nome.toLowerCase());
+        
+        if (!person) {
+          person = {
+            id: crypto.randomUUID(),
+            productionId: selectedProdId,
+            name: nome,
+            role: 'Membro Troupe',
+            department: 'Generico',
+            whatsapp: sub.formData['Telefono'] || sub.formData['Cellulare'] || '',
+            deliveredAt: sub.submittedAt,
+            hubToken: crypto.randomUUID()
+          };
+          updatedPeople.push(person);
+        }
+        submissionsToProcess.push({ person, sub });
+      }
+
+      // Process all concurrently
+      submissionsToProcess.forEach(({ person, sub }) => {
         if (!person.deliveredAt) {
           person.deliveredAt = sub.submittedAt;
         }
-
-        // Find pending document instances for this person
-        const pendingInstances = updatedInstances.filter(
-          inst => inst.personId === personId && inst.status !== DocStatus.SIGNED
-        );
-
-        for (const instance of pendingInstances) {
-          const template = data.templates.find(t => t.id === instance.templateId);
-          if (!template) continue;
-
-          // Generate PDF
-          try {
-            const finalPdfBase64 = await generateFilledPdf(template, sub.formData, sub.signatureUrl);
-            
-            // Upload PDF to Vercel Blob
-            const uploadRes = await fetch('/api/upload-pdf', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                base64Pdf: finalPdfBase64,
-                filename: `${person.name.replace(/\s+/g, '_')}_${template.name.replace(/\s+/g, '_')}.pdf`
-              })
-            });
-            
-            let finalPdfUrl = '';
-            if (uploadRes.ok) {
-              const uploadData = await uploadRes.json();
-              finalPdfUrl = uploadData.url;
-            } else {
-              console.error("Failed to upload PDF to Blob");
-              // Fallback to base64 if upload fails, though it might break localStorage
-              finalPdfUrl = finalPdfBase64;
-            }
-            
-            // Update instance
-            instance.status = DocStatus.SIGNED;
-            instance.signedAt = sub.submittedAt;
-            instance.finalPdfUrl = finalPdfUrl;
-            instance.auditJSON = JSON.stringify({
-              submittedAt: sub.submittedAt,
-              userAgent: 'Tally.so Sync',
-              formData: sub.formData
-            });
-
-            // Add notification
-            newNotifications.push({
-              id: crypto.randomUUID(),
-              productionId: selectedProdId,
-              personId: personId,
-              documentInstanceId: instance.id,
-              type: 'DOCUMENT_SIGNED',
-              title: 'Nuovo documento firmato',
-              message: `${person.name} ha firmato ${template.name} tramite Tally`,
-              createdAt: new Date().toISOString(),
-              readAt: null
-            });
-
-          } catch (pdfErr) {
-            console.error("Errore generazione PDF per", person.name, pdfErr);
-          }
+        person.fieldsJSON = JSON.stringify(sub.formData);
+        
+        // Add a notification if it's new
+        if (!data.notifications.some(n => n.personId === person.id && n.type === 'DOCUMENT_SIGNED')) {
+          newNotifications.push({
+            id: crypto.randomUUID(),
+            productionId: selectedProdId,
+            personId: person.id,
+            documentInstanceId: '',
+            type: 'DOCUMENT_SIGNED',
+            title: 'Nuovo form compilato',
+            message: `${person.name} ha compilato il form su Tally`,
+            createdAt: new Date().toISOString(),
+            readAt: null
+          });
         }
-      }
+      });
 
       setData(prev => ({
         ...prev,
@@ -440,8 +460,8 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
         instances: updatedInstances,
         notifications: newNotifications
       }));
-
-      alert(`Sincronizzazione completata: ${matchedSubmissions.length} sottomissioni elaborate.`);
+      
+      alert(`Sincronizzazione completata: ${submissionsToProcess.length} sottomissioni elaborate.`);
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -747,6 +767,7 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
               { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
               { id: 'PEOPLE', label: 'Cast & Crew', icon: Users },
               { id: 'REQUESTS', label: 'In Attesa', icon: Inbox },
+              { id: 'SIGNED', label: 'Risposte', icon: CheckCircle },
               { id: 'TEMPLATES', label: 'Template', icon: FileText },
             ].map(item => (
               <button key={item.id} onClick={() => { setActiveTab(item.id as any); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${activeTab === item.id ? 'bg-indigo-600/10 text-indigo-600' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5'}`}>
@@ -808,10 +829,10 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
                   <p className="text-4xl font-black mt-1 text-slate-900 dark:text-white">{pendingPeople.length}</p>
                   {pendingPeople.length > 0 && <span className="absolute top-8 right-8 w-3 h-3 bg-amber-500 rounded-full animate-pulse"></span>}
                 </div>
-                <div onClick={() => setActiveTab('TEMPLATES')} className="bg-white p-8 dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-white/5 hover:shadow-2xl transition-all cursor-pointer group">
-                  <div className="w-14 h-14 bg-emerald-600/10 text-emerald-600 rounded-2xl flex items-center justify-center mb-6"><FileText className="w-7 h-7" /></div>
-                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Template PDF</p>
-                  <p className="text-4xl font-black mt-1 text-slate-900 dark:text-white">{prodTemplates.length}</p>
+                <div onClick={() => setActiveTab('SIGNED')} className="bg-white p-8 dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-white/5 hover:shadow-2xl transition-all cursor-pointer group">
+                  <div className="w-14 h-14 bg-emerald-600/10 text-emerald-600 rounded-2xl flex items-center justify-center mb-6"><CheckCircle className="w-7 h-7" /></div>
+                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Risposte</p>
+                  <p className="text-4xl font-black mt-1 text-slate-900 dark:text-white">{signedPeople.length}</p>
                 </div>
               </div>
             </div>
@@ -861,7 +882,7 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
                     <div className="flex items-center gap-2">
                       {!p.deliveredAt && (
                         <button type="button" onClick={(e) => { e.stopPropagation(); handleSendWhatsApp(p); }} className="p-2.5 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-xl transition-colors">
-                          {p.sentAt ? <Check className="w-5 h-5 pointer-events-none" /> : <Send className="w-5 h-5 pointer-events-none" />}
+                          {p.solicitedAt ? <CheckCheck className="w-5 h-5 pointer-events-none" /> : p.sentAt ? <Check className="w-5 h-5 pointer-events-none" /> : <Send className="w-5 h-5 pointer-events-none" />}
                         </button>
                       )}
                       <button type="button" onClick={(e) => { e.stopPropagation(); handleDeletePerson(p.id, e); }} className="relative z-10 p-2.5 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-colors">
@@ -897,8 +918,8 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{p.role}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <button type="button" onClick={() => handleSendWhatsApp(p)} className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2">
-                        {p.sentAt ? <Check className="w-3.5 h-3.5 pointer-events-none" /> : <Send className="w-3.5 h-3.5 pointer-events-none" />} Sollecita
+                      <button type="button" onClick={() => handleSollecitaWhatsApp(p)} className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2">
+                        {p.solicitedAt ? <CheckCheck className="w-3.5 h-3.5 pointer-events-none" /> : p.sentAt ? <Check className="w-3.5 h-3.5 pointer-events-none" /> : <Send className="w-3.5 h-3.5 pointer-events-none" />} Sollecita
                       </button>
                     </div>
                   </div>
@@ -907,6 +928,90 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
                   <div className="bg-white dark:bg-slate-900 py-16 rounded-[2.5rem] border border-dashed border-slate-200 dark:border-white/5 text-center">
                     <CheckCircle className="w-12 h-12 text-emerald-500/20 mx-auto mb-4" />
                     <p className="text-slate-400 font-medium italic">Tutti i membri hanno consegnato il form!</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'SIGNED' && (
+            <div className="space-y-8 animate-fade-in">
+              <div className="flex justify-between items-center flex-wrap gap-4">
+                <div>
+                  <h2 className="text-3xl font-black text-slate-900 dark:text-white">Risposte Form</h2>
+                  <p className="text-slate-500 text-sm font-medium">Membri che hanno completato il form.</p>
+                </div>
+                <button onClick={handleSyncTally} disabled={isSyncingTally} className="px-6 py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 flex items-center gap-2 transition-all disabled:opacity-50">
+                  <RefreshCw className={`w-4 h-4 ${isSyncingTally ? 'animate-spin' : ''}`} /> Sincronizza Tally
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {signedPeople.map(p => {
+                  let formData: any = null;
+                  if (p.fieldsJSON) {
+                    try {
+                      formData = JSON.parse(p.fieldsJSON);
+                    } catch (e) {}
+                  } else {
+                    // Fallback to old auditJSON if it exists
+                    const personInstances = data.instances.filter(i => i.personId === p.id && i.status === DocStatus.SIGNED);
+                    if (personInstances.length > 0 && personInstances[0].auditJSON) {
+                      try {
+                        const audit = JSON.parse(personInstances[0].auditJSON);
+                        formData = audit.formData;
+                      } catch (e) {}
+                    }
+                  }
+
+                  return (
+                    <div key={p.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm overflow-hidden transition-all">
+                      <div 
+                        onClick={() => setExpandedSignedPersonId(expandedSignedPersonId === p.id ? null : p.id)}
+                        className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-black text-sm truncate text-slate-900 dark:text-white">{p.name}</h4>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{p.role}</p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="p-2 text-slate-400">
+                            {expandedSignedPersonId === p.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {expandedSignedPersonId === p.id && formData && (
+                        <div className="p-5 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-slate-800/50 animate-fade-in">
+                          <h5 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">Dati Inseriti</h5>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            {Object.entries(formData).map(([key, value]) => {
+                              if (key === 'Firma' || !value) return null;
+                              return (
+                                <div key={key} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-white/5">
+                                  <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider mb-1">{key}</p>
+                                  <p className="text-sm font-medium text-slate-900 dark:text-white truncate" title={String(value)}>{String(value)}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {formData['Firma'] && (
+                            <div className="mt-6">
+                              <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider mb-2">Firma</p>
+                              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl p-4 inline-block">
+                                <img src={formData['Firma']} alt="Firma" className="max-h-24 object-contain" referrerPolicy="no-referrer" />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {signedPeople.length === 0 && (
+                  <div className="bg-white dark:bg-slate-900 py-16 rounded-[2.5rem] border border-dashed border-slate-200 dark:border-white/5 text-center">
+                    <FileCheck className="w-12 h-12 text-slate-200 dark:text-white/10 mx-auto mb-4" />
+                    <p className="text-slate-400 font-medium italic">Nessuna risposta al momento.</p>
                   </div>
                 )}
               </div>
