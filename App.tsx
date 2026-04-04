@@ -188,8 +188,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (activeProduction) {
       setFormLinkInput(activeProduction.formLink || '');
-      setWhatsappMessageInput(activeProduction.whatsappMessageTemplate || '');
-      setWhatsappSolicitInput(activeProduction.whatsappSolicitTemplate || '');
+      setWhatsappMessageInput(activeProduction.whatsappMessageTemplate || "Ciao {{nome}}! Compila questi dati per la produzione '{{titolo_produzione}}':\n\n{{link_form}}\n\nI tuoi dati verranno gestiti nella piena sicurezza.");
+      setWhatsappSolicitInput(activeProduction.whatsappSolicitTemplate || "Ciao {{nome}},\n{{link_form}}\nricordati di firmare i documenti necessari per il set di '{{titolo_produzione}}'.");
     }
   }, [activeProduction]);
 
@@ -293,7 +293,7 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
     } else {
       message = `Ciao ${personName},
 ${finalLink}
-ricordati di firmare i documenti necessari per il set.`;
+ricordati di firmare i documenti necessari per il set di '${activeProduction?.title}'.`;
     }
 
     const phone = p.whatsapp.replace(/[^\d+]/g, '');
@@ -856,7 +856,7 @@ ricordati di firmare i documenti necessari per il set.`;
       <aside className={`fixed top-0 left-0 z-50 w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-white/5 h-screen transition-transform lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 flex flex-col h-full pt-10">
           <div className="flex items-center gap-3 mb-8 px-2">
-            <span className="font-black text-2xl tracking-tight text-slate-900 dark:text-white">DOCUSMARTSET</span>
+            <span className="font-black text-2xl tracking-tight"><span className="text-blue-600">DOCU</span><span className="text-slate-900 dark:text-white">SMARTSET</span></span>
           </div>
 
           <div className="mb-8 px-2 relative">
@@ -1286,7 +1286,13 @@ ricordati di firmare i documenti necessari per il set.`;
                 <p className="text-slate-400 text-xs mb-3 font-medium">Usa le variabili: <code className="bg-slate-100 dark:bg-white/10 px-1 py-0.5 rounded">{"{{nome}}"}</code>, <code className="bg-slate-100 dark:bg-white/10 px-1 py-0.5 rounded">{"{{titolo_produzione}}"}</code>, <code className="bg-slate-100 dark:bg-white/10 px-1 py-0.5 rounded">{"{{link_form}}"}</code></p>
                 <textarea 
                   value={whatsappMessageInput} 
-                  onChange={e => setWhatsappMessageInput(e.target.value)} 
+                  onChange={e => {
+                    const val = e.target.value;
+                    const required = ["{{nome}}", "{{titolo_produzione}}", "{{link_form}}"];
+                    if (required.every(r => val.includes(r))) {
+                      setWhatsappMessageInput(val);
+                    }
+                  }} 
                   className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-medium outline-none text-slate-900 dark:text-white min-h-[120px] resize-y" 
                   placeholder="Ciao {{nome}}! Compila questi dati per la produzione '{{titolo_produzione}}':&#10;&#10;{{link_form}}&#10;&#10;I tuoi dati verranno gestiti nella piena sicurezza."
                 />
@@ -1296,9 +1302,15 @@ ricordati di firmare i documenti necessari per il set.`;
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Messaggio WhatsApp (Sollecito)</label>
                 <textarea 
                   value={whatsappSolicitInput} 
-                  onChange={e => setWhatsappSolicitInput(e.target.value)} 
+                  onChange={e => {
+                    const val = e.target.value;
+                    const required = ["{{nome}}", "{{titolo_produzione}}", "{{link_form}}"];
+                    if (required.every(r => val.includes(r))) {
+                      setWhatsappSolicitInput(val);
+                    }
+                  }} 
                   className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-medium outline-none text-slate-900 dark:text-white min-h-[100px] resize-y" 
-                  placeholder="Ciao {{nome}},&#10;{{link_form}}&#10;ricordati di firmare i documenti necessari per il set."
+                  placeholder="Ciao {{nome}},&#10;{{link_form}}&#10;ricordati di firmare i documenti necessari per il set di '{{titolo_produzione}}'."
                 />
               </div>
 
