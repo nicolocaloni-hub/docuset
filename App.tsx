@@ -856,8 +856,7 @@ ricordati di firmare i documenti necessari per il set.`;
       <aside className={`fixed top-0 left-0 z-50 w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-white/5 h-screen transition-transform lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 flex flex-col h-full pt-10">
           <div className="flex items-center gap-3 mb-8 px-2">
-            <div className="bg-indigo-600 p-2 rounded-xl shadow-lg shadow-indigo-500/20"><FileCheck className="w-6 h-6 text-white" /></div>
-            <span className="font-black text-xl tracking-tight text-slate-900 dark:text-white">DocuSet</span>
+            <span className="font-black text-2xl tracking-tight text-slate-900 dark:text-white">DOCUSMARTSET</span>
           </div>
 
           <div className="mb-8 px-2 relative">
