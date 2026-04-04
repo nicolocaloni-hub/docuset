@@ -96,6 +96,11 @@ const App: React.FC = () => {
   const [editingPendingMember, setEditingPendingMember] = useState<Person | null>(null);
   const [expandedSignedPersonId, setExpandedSignedPersonId] = useState<string | null>(null);
 
+  const [isTemplateSelectModalOpen, setIsTemplateSelectModalOpen] = useState(false);
+  const [selectedPersonForTemplate, setSelectedPersonForTemplate] = useState<Person | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+
   // Modal State for deletions
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'person' | 'template' | 'production', id: string, name: string } | null>(null);
 
@@ -105,6 +110,8 @@ const App: React.FC = () => {
   const [newProdData, setNewProdData] = useState({ title: '', notes: '', phone: '' });
   const [newMemberData, setNewMemberData] = useState({ name: '', role: '', department: '', whatsapp: '' });
   const [formLinkInput, setFormLinkInput] = useState('');
+  const [whatsappMessageInput, setWhatsappMessageInput] = useState('');
+  const [whatsappSolicitInput, setWhatsappSolicitInput] = useState('');
 
   const docxInputRef = useRef<HTMLInputElement>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
@@ -158,7 +165,11 @@ const App: React.FC = () => {
             })
           }));
         }
-      } catch (e) {
+      } catch (e: any) {
+        if (e.message === 'Failed to fetch') {
+          // Ignore network errors during polling (e.g. server restarting)
+          return;
+        }
         console.error('Polling Tally Status Error:', e);
       }
     };
@@ -175,14 +186,23 @@ const App: React.FC = () => {
   const prodTemplates = useMemo(() => data.templates, [data.templates]);
 
   useEffect(() => {
-    if (activeProduction) setFormLinkInput(activeProduction.formLink || '');
+    if (activeProduction) {
+      setFormLinkInput(activeProduction.formLink || '');
+      setWhatsappMessageInput(activeProduction.whatsappMessageTemplate || '');
+      setWhatsappSolicitInput(activeProduction.whatsappSolicitTemplate || '');
+    }
   }, [activeProduction]);
 
   const handleSaveSettings = () => {
     if (!selectedProdId) return;
     setData(prev => ({
       ...prev,
-      productions: prev.productions.map(p => p.id === selectedProdId ? { ...p, formLink: formLinkInput } : p)
+      productions: prev.productions.map(p => p.id === selectedProdId ? { 
+        ...p, 
+        formLink: formLinkInput,
+        whatsappMessageTemplate: whatsappMessageInput,
+        whatsappSolicitTemplate: whatsappSolicitInput
+      } : p)
     }));
     setIsSettingsModalOpen(false);
   };
@@ -215,11 +235,20 @@ const App: React.FC = () => {
     }
 
     const greeting = personName ? `Ciao ${personName}!` : 'Ciao!';
-    const message = `${greeting} Compila questi dati per la produzione "${activeProduction?.title}":
+    
+    let message = '';
+    if (activeProduction?.whatsappMessageTemplate) {
+      message = activeProduction.whatsappMessageTemplate
+        .replace(/{{nome}}/g, personName || '')
+        .replace(/{{titolo_produzione}}/g, activeProduction.title || '')
+        .replace(/{{link_form}}/g, finalLink);
+    } else {
+      message = `${greeting} Compila questi dati per la produzione "${activeProduction?.title}":
 
 ${finalLink}
 
 I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di privacy.`;
+    }
 
     const phone = p ? p.whatsapp.replace(/[^\d+]/g, '') : '';
     
@@ -255,9 +284,17 @@ I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di pr
     finalLink += `${separator}pid=${selectedProdId}&mid=${p.id}`;
     const personName = p.name.split(' ')[0];
 
-    const message = `Ciao ${personName},
+    let message = '';
+    if (activeProduction?.whatsappSolicitTemplate) {
+      message = activeProduction.whatsappSolicitTemplate
+        .replace(/{{nome}}/g, personName || '')
+        .replace(/{{titolo_produzione}}/g, activeProduction.title || '')
+        .replace(/{{link_form}}/g, finalLink);
+    } else {
+      message = `Ciao ${personName},
 ${finalLink}
 ricordati di firmare i documenti necessari per il set.`;
+    }
 
     const phone = p.whatsapp.replace(/[^\d+]/g, '');
     
@@ -368,6 +405,92 @@ ricordati di firmare i documenti necessari per il set.`;
     setData(prev => ({ ...prev, people: [...prev.people, ...pendingImportMembers] }));
     setPendingImportMembers(null);
     alert(`Importazione confermata: ${pendingImportMembers.length} membri aggiunti.`);
+  };
+
+  const handleGeneratePdf = async () => {
+    if (!selectedPersonForTemplate || !selectedTemplateId) return;
+    setIsGeneratingPdf(true);
+    try {
+      const template = data.templates.find(t => t.id === selectedTemplateId);
+      if (!template) throw new Error("Template non trovato");
+
+      // Fetch the PDF template
+      const pdfBytes = await fetch(template.fileUrl).then(res => res.arrayBuffer());
+      
+      // Load the PDFDocument
+      const { PDFDocument } = await import('pdf-lib');
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+      const form = pdfDoc.getForm();
+
+      // Get person data
+      let formData: any = null;
+      if (selectedPersonForTemplate.fieldsJSON) {
+        try {
+          formData = JSON.parse(selectedPersonForTemplate.fieldsJSON);
+        } catch (e) {}
+      } else {
+        const personInstances = data.instances.filter(i => i.personId === selectedPersonForTemplate.id && i.status === DocStatus.SIGNED);
+        if (personInstances.length > 0 && personInstances[0].auditJSON) {
+          try {
+            const audit = JSON.parse(personInstances[0].auditJSON);
+            formData = audit.formData;
+          } catch (e) {}
+        }
+      }
+
+      if (formData) {
+        const fields = form.getFields();
+        for (const field of fields) {
+          const fieldName = field.getName();
+          
+          let matchedValue = null;
+          for (const [key, value] of Object.entries(formData)) {
+            const normalizedKey = key.toLowerCase().trim();
+            const normalizedFieldName = fieldName.toLowerCase().trim();
+            
+            if (
+              normalizedFieldName === normalizedKey || 
+              (normalizedKey.length > 3 && normalizedFieldName.includes(normalizedKey)) ||
+              (normalizedFieldName.length > 3 && normalizedKey.includes(normalizedFieldName))
+            ) {
+              matchedValue = value;
+              break;
+            }
+          }
+
+          if (matchedValue) {
+            try {
+              if (field.constructor.name === 'PDFTextField') {
+                form.getTextField(fieldName).setText(String(matchedValue));
+              }
+            } catch (e) {
+              console.error(`Errore compilazione campo ${fieldName}:`, e);
+            }
+          }
+        }
+      }
+
+      form.flatten();
+
+      // Save the PDF
+      const pdfBytesOut = await pdfDoc.save();
+      const blob = new Blob([pdfBytesOut as any], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selectedPersonForTemplate.name}_${template.name}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setIsTemplateSelectModalOpen(false);
+      setSelectedPersonForTemplate(null);
+      setSelectedTemplateId('');
+    } catch (error) {
+      console.error("Errore generazione PDF:", error);
+      alert("Errore durante la generazione del PDF.");
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   const handleSyncTally = async () => {
@@ -921,14 +1044,14 @@ ricordati di firmare i documenti necessari per il set.`;
 
               <div className="space-y-3">
                 {pendingPeople.map(p => (
-                  <div key={p.id} className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm flex items-center justify-between gap-4">
+                  <div key={p.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-row items-center justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <h4 className="font-black text-sm truncate text-slate-900 dark:text-white">{p.name}</h4>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{p.role}</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{p.role}</p>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <button type="button" onClick={() => handleSollecitaWhatsApp(p)} className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2">
-                        {p.solicitedAt ? <CheckCheck className="w-3.5 h-3.5 pointer-events-none" /> : p.sentAt ? <Check className="w-3.5 h-3.5 pointer-events-none" /> : <Send className="w-3.5 h-3.5 pointer-events-none" />} Sollecita
+                    <div className="flex items-center shrink-0">
+                      <button type="button" onClick={() => handleSollecitaWhatsApp(p)} className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2">
+                        {p.solicitedAt ? <CheckCheck className="w-3.5 h-3.5 pointer-events-none" /> : p.sentAt ? <Check className="w-3.5 h-3.5 pointer-events-none" /> : <Send className="w-3.5 h-3.5 pointer-events-none" />} <span className="hidden sm:inline">Sollecita</span>
                       </button>
                     </div>
                   </div>
@@ -977,13 +1100,25 @@ ricordati di firmare i documenti necessari per il set.`;
                     <div key={p.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm overflow-hidden transition-all">
                       <div 
                         onClick={() => setExpandedSignedPersonId(expandedSignedPersonId === p.id ? null : p.id)}
-                        className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                        className="p-4 flex flex-row items-center justify-between gap-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
                       >
                         <div className="flex-1 min-w-0">
                           <h4 className="font-black text-sm truncate text-slate-900 dark:text-white">{p.name}</h4>
-                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{p.role}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{p.role}</p>
                         </div>
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedPersonForTemplate(p);
+                              setIsTemplateSelectModalOpen(true);
+                            }}
+                            className="p-2 text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all"
+                            title="Scarica PDF compilato"
+                          >
+                            <Download className="w-5 h-5 pointer-events-none" />
+                          </button>
                           <div className="p-2 text-slate-400">
                             {expandedSignedPersonId === p.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                           </div>
@@ -995,7 +1130,7 @@ ricordati di firmare i documenti necessari per il set.`;
                           <h5 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">Dati Inseriti</h5>
                           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                             {Object.entries(formData).map(([key, value]) => {
-                              const lowerKey = key.toLowerCase();
+                              const lowerKey = key.toLowerCase().trim();
                               const strValue = String(value);
                               
                               // Hide unwanted fields
@@ -1006,7 +1141,9 @@ ricordati di firmare i documenti necessari per il set.`;
                                 lowerKey === 'mid' || 
                                 lowerKey === 'data emissione' || 
                                 lowerKey === 'data di emissione' || 
-                                lowerKey === 'scadenza'
+                                lowerKey === 'scadenza' ||
+                                lowerKey === 'datanascita' ||
+                                lowerKey === 'cf'
                               ) return null;
 
                               // Check if it's a signature/file link
@@ -1134,15 +1271,41 @@ ricordati di firmare i documenti necessari per il set.`;
       )}
 
       {isSettingsModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
-            <h3 className="text-2xl font-black mb-6 text-slate-900 dark:text-white">Impostazioni Form Tally</h3>
-            <p className="text-slate-500 text-sm mb-6 font-medium">Inserisci l'URL del form Tally. Verranno aggiunti automaticamente i parametri pid e mid.</p>
-            <div className="space-y-4">
-              <input value={formLinkInput} onChange={e => setFormLinkInput(e.target.value)} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-bold outline-none text-slate-900 dark:text-white" placeholder="https://tally.so/r/XXXXXX" />
-              <div className="flex gap-4">
-                <button type="button" onClick={() => setIsSettingsModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-bold">Annulla</button>
-                <button type="button" onClick={handleSaveSettings} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg">Salva</button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10 my-8">
+            <h3 className="text-2xl font-black mb-6 text-slate-900 dark:text-white">Impostazioni Produzione</h3>
+            
+            <div className="space-y-6">
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Link Form Tally</label>
+                <p className="text-slate-400 text-xs mb-3 font-medium">Inserisci l'URL del form Tally. Verranno aggiunti automaticamente i parametri pid e mid.</p>
+                <input value={formLinkInput} onChange={e => setFormLinkInput(e.target.value)} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-bold outline-none text-slate-900 dark:text-white" placeholder="https://tally.so/r/XXXXXX" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Messaggio WhatsApp (Iniziale)</label>
+                <p className="text-slate-400 text-xs mb-3 font-medium">Usa le variabili: <code className="bg-slate-100 dark:bg-white/10 px-1 py-0.5 rounded">{"{{nome}}"}</code>, <code className="bg-slate-100 dark:bg-white/10 px-1 py-0.5 rounded">{"{{titolo_produzione}}"}</code>, <code className="bg-slate-100 dark:bg-white/10 px-1 py-0.5 rounded">{"{{link_form}}"}</code></p>
+                <textarea 
+                  value={whatsappMessageInput} 
+                  onChange={e => setWhatsappMessageInput(e.target.value)} 
+                  className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-medium outline-none text-slate-900 dark:text-white min-h-[120px] resize-y" 
+                  placeholder="Ciao {{nome}}! Compila questi dati per la produzione '{{titolo_produzione}}':&#10;&#10;{{link_form}}&#10;&#10;I tuoi dati verranno gestiti nella piena sicurezza."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Messaggio WhatsApp (Sollecito)</label>
+                <textarea 
+                  value={whatsappSolicitInput} 
+                  onChange={e => setWhatsappSolicitInput(e.target.value)} 
+                  className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-medium outline-none text-slate-900 dark:text-white min-h-[100px] resize-y" 
+                  placeholder="Ciao {{nome}},&#10;{{link_form}}&#10;ricordati di firmare i documenti necessari per il set."
+                />
+              </div>
+
+              <div className="flex gap-4 pt-2">
+                <button type="button" onClick={() => setIsSettingsModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
+                <button type="button" onClick={handleSaveSettings} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Salva</button>
               </div>
             </div>
           </div>
@@ -1266,6 +1429,52 @@ ricordati di firmare i documenti necessari per il set.`;
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setEditingPendingMember(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
                 <button type="button" onClick={handleSaveEditedPendingMember} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Salva Modifiche</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {isTemplateSelectModalOpen && selectedPersonForTemplate && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
+            <h3 className="text-2xl font-black mb-2 text-slate-900 dark:text-white">Genera PDF</h3>
+            <p className="text-slate-500 text-sm mb-6 font-medium">
+              Seleziona un template da compilare con i dati di <strong>{selectedPersonForTemplate.name}</strong>.
+            </p>
+            <div className="space-y-4">
+              <select
+                value={selectedTemplateId}
+                onChange={e => setSelectedTemplateId(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-bold outline-none text-slate-900 dark:text-white appearance-none"
+              >
+                <option value="">-- Seleziona un Template --</option>
+                {data.templates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <div className="flex gap-4 pt-4">
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setIsTemplateSelectModalOpen(false);
+                    setSelectedTemplateId('');
+                  }} 
+                  className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest"
+                >
+                  Annulla
+                </button>
+                <button 
+                  type="button" 
+                  onClick={handleGeneratePdf} 
+                  disabled={!selectedTemplateId || isGeneratingPdf}
+                  className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isGeneratingPdf ? (
+                    <><RefreshCw className="w-4 h-4 animate-spin" /> Generazione...</>
+                  ) : (
+                    <><Download className="w-4 h-4" /> Genera e Scarica</>
+                  )}
+                </button>
               </div>
             </div>
           </div>

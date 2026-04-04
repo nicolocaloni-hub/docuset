@@ -69,6 +69,8 @@ export interface Production {
   notes?: string;
   producerPhone?: string;
   formLink?: string;
+  whatsappMessageTemplate?: string;
+  whatsappSolicitTemplate?: string;
 }
 
 export interface DocumentInstance {

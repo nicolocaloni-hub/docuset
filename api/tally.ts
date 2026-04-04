@@ -136,6 +136,14 @@ export default async function handler(req: any, res: any) {
           nome = fullFormData['Nome e Cognome'] || fullFormData['nome e cognome'] || fullFormData['Nome'] || fullFormData['nome'] || '';
         }
 
+        // Clean up unwanted fields from fullFormData before saving
+        const keysToRemove = ['nome e cognome', 'pid', 'mid', 'data di emissione', 'data emissione', 'scadenza'];
+        for (const key of Object.keys(fullFormData)) {
+          if (keysToRemove.includes(key.toLowerCase().trim())) {
+            delete fullFormData[key];
+          }
+        }
+
         let signatureBase64 = '';
 
         const normalizeName = (n: string) => n ? n.toLowerCase().trim().replace(/\s+/g, ' ') : '';
