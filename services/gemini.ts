@@ -3,10 +3,15 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 // Always create a new GoogleGenAI instance right before making an API call to ensure it always uses the most up-to-date API key
 export async function extractDocumentData(base64Image: string, mimeType: string) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'undefined') {
+    throw new Error("Chiave API di Gemini mancante. Inserisci GEMINI_API_KEY nelle impostazioni dell'applicazione.");
+  }
+
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite-preview',
+      model: 'gemini-3.1-flash-lite-preview',
       contents: {
         parts: [
           {
@@ -47,10 +52,15 @@ export async function extractDocumentData(base64Image: string, mimeType: string)
 }
 
 export async function askAssistant(prompt: string, contextData: any) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'undefined') {
+    return "Configura la GEMINI_API_KEY nelle impostazioni per usare l'assistente.";
+  }
+
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite-preview',
+      model: 'gemini-3.1-flash-lite-preview',
       contents: `Sei DocuBot, l'assistente AI di DocuSet, una piattaforma di gestione documenti per produzioni cinematografiche. 
       Ecco i dati attuali delle produzioni e documenti: ${JSON.stringify(contextData)}.
       Rispondi in modo professionale e conciso in italiano alle domande dell'utente.

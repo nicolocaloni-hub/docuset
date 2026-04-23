@@ -655,10 +655,14 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
             try {
               const base64Data = (reader.result as string).split(',')[1];
               
-              const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+              const apiKey = process.env.GEMINI_API_KEY;
+              if (!apiKey || apiKey === 'undefined') {
+                throw new Error("Chiave API di Gemini mancante. Inserisci GEMINI_API_KEY nelle impostazioni.");
+              }
+              const ai = new GoogleGenAI({ apiKey });
               
               const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-lite-preview',
+                model: 'gemini-3.1-flash-lite-preview',
                 contents: [
                   {
                     inlineData: {
