@@ -4,9 +4,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 // Always create a new GoogleGenAI instance right before making an API call to ensure it always uses the most up-to-date API key
 export async function extractDocumentData(base64Image: string, mimeType: string) {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash-lite-preview',
       contents: {
         parts: [
           {
@@ -16,7 +16,7 @@ export async function extractDocumentData(base64Image: string, mimeType: string)
             },
           },
           {
-            text: "Estrai i dettagli personali da questo documento d'identità o CV italiano. Restituisci un oggetto JSON con: firstName (nome), lastName (cognome), birthDate (data di nascita YYYY-MM-DD), e role (ruolo, se menzionato). Se un campo non viene trovato, lascialo vuoto. Assicurati che la data sia nel formato YYYY-MM-DD.",
+            text: "Estrai i dettagli personali da questo documento d'identità o CV italiano. Restituisci un oggetto JSON con: firstName (nome), lastName (cognome), phone (numero di telefono) e role (ruolo, se menzionato). Se un campo non viene trovato, lascialo vuoto. Non estrarre altri campi.",
           },
         ],
       },
@@ -27,7 +27,7 @@ export async function extractDocumentData(base64Image: string, mimeType: string)
           properties: {
             firstName: { type: Type.STRING },
             lastName: { type: Type.STRING },
-            birthDate: { type: Type.STRING },
+            phone: { type: Type.STRING },
             role: { type: Type.STRING },
           },
         },
@@ -48,9 +48,9 @@ export async function extractDocumentData(base64Image: string, mimeType: string)
 
 export async function askAssistant(prompt: string, contextData: any) {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash-lite-preview',
       contents: `Sei DocuBot, l'assistente AI di DocuSet, una piattaforma di gestione documenti per produzioni cinematografiche. 
       Ecco i dati attuali delle produzioni e documenti: ${JSON.stringify(contextData)}.
       Rispondi in modo professionale e conciso in italiano alle domande dell'utente.

@@ -658,7 +658,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
               const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
               
               const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
+                model: 'gemini-2.5-flash-lite-preview',
                 contents: [
                   {
                     inlineData: {
@@ -666,7 +666,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
                       mimeType: file.type || 'application/pdf'
                     }
                   },
-                  "Estrai la lista della troupe da questo documento. Ritorna un array JSON di oggetti, dove ogni oggetto rappresenta una persona. I campi devono essere: 'name' (stringa, Nome e Cognome), 'role' (stringa, Ruolo), 'phone' (stringa, Numero di telefono, solo cifre e + se presente), 'department' (stringa, Reparto, es. PRODUZIONE, REGIA, FOTOGRAFIA, ecc. Deducilo dalle intestazioni della tabella o dalle sezioni). Ignora le righe vuote o senza il nome della persona."
+                  "Estrai la lista della troupe da questo documento. Ritorna un array JSON di oggetti, dove ogni oggetto rappresenta una persona. I campi devono essere: 'name' (stringa, Nome e Cognome), 'role' (stringa, Ruolo), 'phone' (stringa, Numero di telefono, solo cifre e + se presente). Ignora altri campi e le righe vuote o senza il nome della persona."
                 ],
                 config: {
                   responseMimeType: "application/json",
@@ -677,10 +677,9 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
                       properties: {
                         name: { type: Type.STRING },
                         role: { type: Type.STRING },
-                        phone: { type: Type.STRING },
-                        department: { type: Type.STRING }
+                        phone: { type: Type.STRING }
                       },
-                      required: ["name", "role", "phone", "department"]
+                      required: ["name", "role", "phone"]
                     }
                   }
                 }

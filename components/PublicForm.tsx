@@ -41,6 +41,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
     birthDate: '',
     taxCode: '',
     role: '',
+    phone: '',
     idNumber: '',
     signature: '',
   });
@@ -96,7 +97,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
           ...prev,
           firstName: result.firstName || prev.firstName,
           lastName: result.lastName || prev.lastName,
-          birthDate: result.birthDate || prev.birthDate,
+          phone: result.phone || prev.phone,
           role: result.role || prev.role,
         }));
         setLoading(false);
@@ -235,6 +236,10 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Codice Fiscale</label>
                 <input required type="text" value={form.taxCode} onChange={(e) => setForm({ ...form, taxCode: e.target.value.toUpperCase() })} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white font-mono font-bold" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Telefono</label>
+                <input required type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white" />
               </div>
               <button type="button" onClick={() => setStep(1)} className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-indigo-600"><ChevronLeft className="w-3 h-3" /> Torna al caricamento</button>
             </div>

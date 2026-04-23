@@ -151,6 +151,7 @@ export interface FormState {
   birthDate: string;
   taxCode: string;
   role: string;
+  phone: string;
   idNumber: string;
   signature: string;
 }
