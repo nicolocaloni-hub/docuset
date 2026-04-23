@@ -108,7 +108,7 @@ const App: React.FC = () => {
   const [editingTitleValue, setEditingTitleValue] = useState('');
 
   const [newProdData, setNewProdData] = useState({ title: '', notes: '', phone: '' });
-  const [newMemberData, setNewMemberData] = useState({ name: '', role: '', department: '', whatsapp: '' });
+  const [newMemberData, setNewMemberData] = useState({ name: '', role: '', whatsapp: '' });
   const [formLinkInput, setFormLinkInput] = useState('');
   const [whatsappMessageInput, setWhatsappMessageInput] = useState('');
   const [whatsappSolicitInput, setWhatsappSolicitInput] = useState('');
@@ -383,19 +383,34 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
     }
   };
 
+  const formatPhone = (phone: string) => {
+    const clean = (phone || '').trim().replace(/\s+/g, '');
+    if (!clean) return '';
+    if (clean.startsWith('+')) return clean;
+    if (clean.startsWith('00')) return '+' + clean.substring(2);
+    // If it's something like 39340... (starting with 39 but no +)
+    // We should probably check if it has 12 chars to avoid double 39, 
+    // but the instruction says "Imposta sempre il +39 italiano", 
+    // and "Qualora ci fosse segnalato un +... modifica solo per quel numero".
+    // So simple prefixing should work if they don't manually type the 39.
+    return '+39' + clean.replace(/^39/, ''); // Avoid double 39 if it starts with 39
+  };
+
   const handleSaveEditedPerson = () => {
     if (!editingPerson) return;
+    const formatted = { ...editingPerson, whatsapp: formatPhone(editingPerson.whatsapp) };
     setData(prev => ({
       ...prev,
-      people: prev.people.map(p => p.id === editingPerson.id ? editingPerson : p)
+      people: prev.people.map(p => p.id === formatted.id ? formatted : p)
     }));
     setEditingPerson(null);
   };
 
   const handleSaveEditedPendingMember = () => {
     if (!editingPendingMember || !pendingImportMembers) return;
+    const formatted = { ...editingPendingMember, whatsapp: formatPhone(editingPendingMember.whatsapp) };
     setPendingImportMembers(prev => 
-      prev ? prev.map(p => p.id === editingPendingMember.id ? editingPendingMember : p) : null
+      prev ? prev.map(p => p.id === formatted.id ? formatted : p) : null
     );
     setEditingPendingMember(null);
   };
@@ -752,7 +767,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
       
       for (const p of parsedMembers) {
         if (!p.name) continue;
-        const cleanPhone = (p.phone || '').replace(/[^\d+]/g, '');
+        const formattedPhone = formatPhone(p.phone || '');
         const isDuplicate = data.people.some(existing => existing.productionId === selectedProdId && !existing.removedAt && existing.name.toLowerCase() === p.name.toLowerCase());
         
         if (isDuplicate) { 
@@ -765,8 +780,8 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
           productionId: selectedProdId,
           name: p.name,
           role: p.role || 'Crew',
-          department: p.department || 'Generale',
-          whatsapp: cleanPhone,
+          department: 'Generale',
+          whatsapp: formattedPhone,
           hubToken: crypto.randomUUID()
         });
       }
@@ -804,13 +819,13 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
       productionId: selectedProdId,
       name: newMemberData.name,
       role: newMemberData.role || 'Crew',
-      department: newMemberData.department || 'Generale',
-      whatsapp: newMemberData.whatsapp,
+      department: 'Generale',
+      whatsapp: formatPhone(newMemberData.whatsapp),
       hubToken: crypto.randomUUID()
     };
     setData(prev => ({ ...prev, people: [...prev.people, newMember] }));
     setIsNewMemberModalOpen(false);
-    setNewMemberData({ name: '', role: '', department: '', whatsapp: '' });
+    setNewMemberData({ name: '', role: '', whatsapp: '' });
   };
 
   const handleDeletePerson = (id: string, e: React.UIEvent) => {
@@ -1352,7 +1367,6 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
             <div className="space-y-4">
               <input value={editingPerson.name} onChange={e => setEditingPerson({...editingPerson, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Nome e Cognome" />
               <input value={editingPerson.role} onChange={e => setEditingPerson({...editingPerson, role: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Ruolo" />
-              <input value={editingPerson.department} onChange={e => setEditingPerson({...editingPerson, department: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Reparto" />
               <input value={editingPerson.whatsapp} onChange={e => setEditingPerson({...editingPerson, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Numero WhatsApp" />
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setEditingPerson(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
@@ -1384,7 +1398,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
             <h3 className="text-2xl font-black mb-8 text-slate-900 dark:text-white">Aggiungi Membro</h3>
             <div className="space-y-4">
               <input value={newMemberData.name} onChange={e => setNewMemberData({...newMemberData, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Nome Completo" />
-              <input value={newMemberData.whatsapp} onChange={e => setNewMemberData({...newMemberData, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="WhatsApp (es: 39333...)" />
+              <input value={newMemberData.whatsapp} onChange={e => setNewMemberData({...newMemberData, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="WhatsApp (es: +39333...)" />
               <input value={newMemberData.role} onChange={e => setNewMemberData({...newMemberData, role: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Ruolo" />
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setIsNewMemberModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
@@ -1408,8 +1422,6 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
                     <p className="font-bold text-slate-900 dark:text-white">{p.name}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] uppercase text-slate-400 font-black">{p.role}</span>
-                      <span className="text-[10px] text-slate-300 dark:text-slate-600">•</span>
-                      <span className="text-[10px] uppercase text-slate-400 font-black">{p.department}</span>
                       {p.whatsapp && (
                         <>
                           <span className="text-[10px] text-slate-300 dark:text-slate-600">•</span>
@@ -1438,7 +1450,6 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
             <div className="space-y-4">
               <input value={editingPendingMember.name} onChange={e => setEditingPendingMember({...editingPendingMember, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Nome e Cognome" />
               <input value={editingPendingMember.role} onChange={e => setEditingPendingMember({...editingPendingMember, role: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Ruolo" />
-              <input value={editingPendingMember.department} onChange={e => setEditingPendingMember({...editingPendingMember, department: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Reparto" />
               <input value={editingPendingMember.whatsapp} onChange={e => setEditingPendingMember({...editingPendingMember, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Numero WhatsApp" />
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setEditingPendingMember(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>

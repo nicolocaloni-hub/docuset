@@ -21,7 +21,7 @@ export async function extractDocumentData(base64Image: string, mimeType: string)
             },
           },
           {
-            text: "Estrai i dettagli personali da questo documento d'identità o CV italiano. Restituisci un oggetto JSON con: firstName (nome), lastName (cognome), phone (numero di telefono) e role (ruolo, se menzionato). Se un campo non viene trovato, lascialo vuoto. Non estrarre altri campi.",
+            text: "Estrai i dettagli personali da questo documento d'identità o CV italiano. Restituisci un oggetto JSON con: firstName (nome), lastName (cognome), phone (numero di telefono) e role (ruolo, se menzionato). Se un campo non viene trovato, lascialo vuoto. Non estrarre altri campi. Per il numero di telefono, assicurati di includere il prefisso internazionale: se manca o è italiano, usa '+39'; se è di un altro paese, mantieni il prefisso originale.",
           },
         ],
       },
