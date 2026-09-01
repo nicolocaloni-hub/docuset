@@ -1,6 +1,5 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { GoogleGenAI, Type } from '@google/genai';
 import { 
   FileCheck, LayoutDashboard, Clapperboard, Users, FileText, Settings, 
   Plus, Search, MoreVertical, Send, MessageSquare, Download, Trash2, 
@@ -19,8 +18,7 @@ import {
 } from './types';
 import SignatureCanvasComponent from './components/SignatureCanvas';
 import PublicForm from './components/PublicForm';
-// @ts-ignore
-import mammoth from 'mammoth';
+import { extractCrewMembersFromFile, normalizePhone } from './services/documentExtraction';
 
 declare const PDFLib: any;
 
@@ -383,22 +381,9 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
     }
   };
 
-  const formatPhone = (phone: string) => {
-    const clean = (phone || '').trim().replace(/\s+/g, '');
-    if (!clean) return '';
-    if (clean.startsWith('+')) return clean;
-    if (clean.startsWith('00')) return '+' + clean.substring(2);
-    // If it's something like 39340... (starting with 39 but no +)
-    // We should probably check if it has 12 chars to avoid double 39, 
-    // but the instruction says "Imposta sempre il +39 italiano", 
-    // and "Qualora ci fosse segnalato un +... modifica solo per quel numero".
-    // So simple prefixing should work if they don't manually type the 39.
-    return '+39' + clean.replace(/^39/, ''); // Avoid double 39 if it starts with 39
-  };
-
   const handleSaveEditedPerson = () => {
     if (!editingPerson) return;
-    const formatted = { ...editingPerson, whatsapp: formatPhone(editingPerson.whatsapp) };
+    const formatted = { ...editingPerson, whatsapp: normalizePhone(editingPerson.whatsapp) };
     setData(prev => ({
       ...prev,
       people: prev.people.map(p => p.id === formatted.id ? formatted : p)
@@ -408,7 +393,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
 
   const handleSaveEditedPendingMember = () => {
     if (!editingPendingMember || !pendingImportMembers) return;
-    const formatted = { ...editingPendingMember, whatsapp: formatPhone(editingPendingMember.whatsapp) };
+    const formatted = { ...editingPendingMember, whatsapp: normalizePhone(editingPendingMember.whatsapp) };
     setPendingImportMembers(prev => 
       prev ? prev.map(p => p.id === formatted.id ? formatted : p) : null
     );
@@ -660,114 +645,15 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
 
     setIsParsingDoc(true);
     try {
-      let parsedMembers: any[] = [];
-
-      if (file.name.toLowerCase().endsWith('.pdf')) {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        await new Promise<void>((resolve, reject) => {
-          reader.onload = async () => {
-            try {
-              const base64Data = (reader.result as string).split(',')[1];
-              
-              const apiKey = process.env.GEMINI_API_KEY;
-              if (!apiKey || apiKey === 'undefined') {
-                throw new Error("Chiave API di Gemini mancante. Inserisci GEMINI_API_KEY nelle impostazioni.");
-              }
-              const ai = new GoogleGenAI({ apiKey });
-              
-              const response = await ai.models.generateContent({
-                model: 'gemini-3.1-flash-lite-preview',
-                contents: [
-                  {
-                    inlineData: {
-                      data: base64Data,
-                      mimeType: file.type || 'application/pdf'
-                    }
-                  },
-                  "Estrai la lista della troupe da questo documento. Ritorna un array JSON di oggetti, dove ogni oggetto rappresenta una persona. I campi devono essere: 'name' (stringa, Nome e Cognome), 'role' (stringa, Ruolo), 'phone' (stringa, Numero di telefono, solo cifre e + se presente). Ignora altri campi e le righe vuote o senza il nome della persona."
-                ],
-                config: {
-                  responseMimeType: "application/json",
-                  responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        name: { type: Type.STRING },
-                        role: { type: Type.STRING },
-                        phone: { type: Type.STRING }
-                      },
-                      required: ["name", "role", "phone"]
-                    }
-                  }
-                }
-              });
-
-              const text = response.text;
-              if (!text) throw new Error("Nessuna risposta dall'IA");
-              
-              const data = JSON.parse(text);
-              parsedMembers = data || [];
-              resolve();
-            } catch (err) {
-              reject(err);
-            }
-          };
-          reader.onerror = (error) => reject(error);
-        });
-      } else {
-        // DOCX parsing via mammoth
-        const arrayBuffer = await file.arrayBuffer();
-        const { value: html } = await mammoth.convertToHtml({ arrayBuffer });
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        const table = doc.querySelector('table');
-        if (!table) throw new Error("Nessuna tabella trovata nel DOCX.");
-        const rows = Array.from(table.querySelectorAll('tr'));
-        let headerIdx = -1;
-        let colMap: Record<string, number> = {};
-        for (let i = 0; i < Math.min(rows.length, 5); i++) {
-          const cells = Array.from(rows[i].querySelectorAll('td')).map(td => td.textContent?.trim().toUpperCase() || '');
-          if (cells.includes('REPARTI') && cells.includes('NOME') && cells.includes('RUOLO')) {
-            headerIdx = i;
-            cells.forEach((cell, idx) => {
-              if (cell.includes('REPARTI')) colMap['REPARTI'] = idx;
-              if (cell.includes('NOME')) colMap['NOME'] = idx;
-              if (cell.includes('RUOLO')) colMap['RUOLO'] = idx;
-              if (cell.includes('NUMERO')) colMap['NUMERO'] = idx;
-            });
-            break;
-          }
-        }
-        if (headerIdx === -1) throw new Error("Header non trovato nel DOCX.");
-        
-        let currentDept = 'Generale';
-        for (let i = headerIdx + 1; i < rows.length; i++) {
-          const cells = Array.from(rows[i].querySelectorAll('td')).map(td => td.textContent?.trim() || '');
-          const nome = cells[colMap['NOME']] || '';
-          const ruolo = cells[colMap['RUOLO']] || '';
-          const numero = cells[colMap['NUMERO']] || '';
-          const reparti = cells[colMap['REPARTI']] || '';
-          if (reparti && !nome && !ruolo && !numero) { currentDept = reparti; continue; }
-          if (!nome) continue;
-          
-          parsedMembers.push({
-            name: nome,
-            role: ruolo,
-            department: currentDept,
-            phone: numero
-          });
-        }
-      }
+      const parsedMembers = await extractCrewMembersFromFile(file);
 
       // Process parsed members (both PDF and DOCX)
-      const members: any[] = [];
+      const members: Person[] = [];
       let duplicatesCount = 0;
       
       for (const p of parsedMembers) {
         if (!p.name) continue;
-        const formattedPhone = formatPhone(p.phone || '');
+        const formattedPhone = normalizePhone(p.phone || '');
         const isDuplicate = data.people.some(existing => existing.productionId === selectedProdId && !existing.removedAt && existing.name.toLowerCase() === p.name.toLowerCase());
         
         if (isDuplicate) { 
@@ -776,11 +662,11 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
         }
         
         members.push({
-          id: 'per-' + Math.random().toString(36).substr(2, 9),
+          id: `per-${crypto.randomUUID()}`,
           productionId: selectedProdId,
           name: p.name,
           role: p.role || 'Crew',
-          department: 'Generale',
+          department: p.department || 'Generale',
           whatsapp: formattedPhone,
           hubToken: crypto.randomUUID()
         });
@@ -792,7 +678,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
           alert(`Trovati ${members.length} nuovi membri. ${duplicatesCount} duplicati ignorati.`);
         }
       } else {
-        alert(`Nessun nuovo membro trovato.${duplicatesCount > 0 ? ` (${duplicatesCount} duplicati ignorati)` : ''}`);
+        alert(`Nessun nuovo membro trovato. Verifica che il file contenga una tabella con nome, ruolo e numero.${duplicatesCount > 0 ? ` (${duplicatesCount} duplicati ignorati)` : ''}`);
       }
 
     } catch (err: any) { 
@@ -820,7 +706,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
       name: newMemberData.name,
       role: newMemberData.role || 'Crew',
       department: 'Generale',
-      whatsapp: formatPhone(newMemberData.whatsapp),
+      whatsapp: normalizePhone(newMemberData.whatsapp),
       hubToken: crypto.randomUUID()
     };
     setData(prev => ({ ...prev, people: [...prev.people, newMember] }));
@@ -1510,3 +1396,4 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
 };
 
 export default App;
+

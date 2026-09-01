@@ -2,11 +2,11 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# DocuSet
 
-This contains everything you need to run your app locally.
+Gestione dei documenti e della troupe per produzioni cinematografiche.
 
-View your app in AI Studio: https://ai.studio/apps/a0a9b6fc-4e95-4bd3-b48f-175e370c5e73
+L'importazione della troupe da PDF e DOCX avviene localmente nel browser: i file non vengono inviati a servizi esterni e non richiedono chiavi API.
 
 ## Run Locally
 
@@ -15,6 +15,7 @@ View your app in AI Studio: https://ai.studio/apps/a0a9b6fc-4e95-4bd3-b48f-175e3
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. If you use Tally synchronization, set `TALLY_API_KEY` in `.env.local`.
 3. Run the app:
    `npm run dev`
+

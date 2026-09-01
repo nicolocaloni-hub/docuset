@@ -1,7 +1,8 @@
 {
   "name": "DocuSet - Production Document Manager",
-  "description": "Streamline film production documentation with AI-powered data extraction, digital signatures, and automated PDF generation.",
+  "description": "Streamline film production documentation with local crew data extraction, digital signatures, and automated PDF generation.",
   "requestFramePermissions": [
     "camera"
   ]
 }
+

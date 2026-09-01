@@ -12,7 +12,7 @@ import {
   LayoutDashboard
 } from 'lucide-react';
 import SignatureCanvas from './SignatureCanvas';
-import { extractDocumentData } from '../services/gemini';
+import { extractCrewMembersFromFile, normalizePhone, splitPersonName } from '../services/documentExtraction';
 import { FormState, DocStatus } from '../types';
 
 interface PublicFormProps {
@@ -88,23 +88,21 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
     setError(null);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const result = await extractDocumentData(base64, file.type);
-        
-        setForm(prev => ({
-          ...prev,
-          firstName: result.firstName || prev.firstName,
-          lastName: result.lastName || prev.lastName,
-          phone: result.phone || prev.phone,
-          role: result.role || prev.role,
-        }));
-        setLoading(false);
-      };
-      reader.readAsDataURL(file);
+      const [member] = await extractCrewMembersFromFile(file);
+      if (!member) throw new Error('Nessun dato riconosciuto nel documento.');
+
+      const { firstName, lastName } = splitPersonName(member.name);
+      setForm(prev => ({
+        ...prev,
+        firstName: firstName || prev.firstName,
+        lastName: lastName || prev.lastName,
+        phone: normalizePhone(member.phone) || prev.phone,
+        role: member.role || prev.role,
+      }));
+      setStep(2);
     } catch (err) {
-      setError("Impossibile estrarre i dati. Compila manualmente.");
+      setError("Impossibile leggere automaticamente i dati. Puoi proseguire con la compilazione manuale.");
+    } finally {
       setLoading(false);
     }
   };
@@ -197,7 +195,7 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
             {step === 3 && "Concludi e Firma"}
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">
-            {step === 1 && `Ciao ${inviteData?.personName}, carica il tuo documento per compilare i campi istantaneamente.`}
+            {step === 1 && `Ciao ${inviteData?.personName}, puoi caricare un PDF o DOCX con i tuoi dati oppure compilare a mano.`}
             {step === 2 && "Controlla che le informazioni caricate siano corrette."}
             {step === 3 && `Stai firmando digitalmente: ${inviteData?.templateName}.`}
           </p>
@@ -207,16 +205,21 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
           {step === 1 && (
             <div className="space-y-6 animate-fade-in">
               <div className="relative group">
-                <input type="file" accept="image/*,.pdf" onChange={handleFileUpload} className="hidden" id="doc-upload" />
+                <input type="file" accept=".pdf,.docx" onChange={handleFileUpload} className="hidden" id="doc-upload" />
                 <label htmlFor="doc-upload" className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-white/10 rounded-[2.5rem] p-12 bg-white dark:bg-white/5 hover:border-indigo-500 transition-all cursor-pointer shadow-sm group">
                   {loading ? <Loader2 className="w-14 h-14 text-indigo-600 animate-spin mb-6" /> : (
                     <div className="w-14 h-14 bg-slate-100 dark:bg-white/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                       <Upload className="w-7 h-7 text-slate-400 group-hover:text-indigo-600" />
                     </div>
                   )}
-                  <p className="text-xl font-black text-slate-900 dark:text-white">{loading ? "Analisi AI..." : "Carica Documento"}</p>
+                  <p className="text-xl font-black text-slate-900 dark:text-white">{loading ? "Lettura documento..." : "Carica PDF/DOCX"}</p>
                 </label>
               </div>
+              {error && (
+                <div role="alert" className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+                  {error}
+                </div>
+              )}
               <button type="button" onClick={() => setStep(2)} className="w-full py-4 text-sm font-black text-slate-400 hover:text-indigo-600 transition-colors underline underline-offset-8">Salta e compila a mano</button>
             </div>
           )}
@@ -286,3 +289,4 @@ const PublicForm: React.FC<PublicFormProps> = ({ hubToken, onComplete }) => {
 };
 
 export default PublicForm;
+
