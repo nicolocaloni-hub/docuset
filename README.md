@@ -6,7 +6,9 @@
 
 Gestione dei documenti e della troupe per produzioni cinematografiche.
 
-L'importazione della troupe da PDF e DOCX avviene localmente nel browser: i file non vengono inviati a servizi esterni e non richiedono chiavi API.
+L'importazione della troupe da PDF e DOCX e l'importazione delle risposte Tally da CSV avvengono localmente nel browser: i file non vengono inviati a servizi esterni e non richiedono chiavi API.
+
+Per aggiornare le risposte, apri la sezione **Submissions** del form in Tally, scegli **Download CSV** e carica il file con **Importa CSV** in DocuSet. Il link pubblico del form e i messaggi WhatsApp configurati nell'app continuano a funzionare normalmente.
 
 ## Run Locally
 
@@ -15,7 +17,5 @@ L'importazione della troupe da PDF e DOCX avviene localmente nel browser: i file
 
 1. Install dependencies:
    `npm install`
-2. If you use Tally synchronization, set `TALLY_API_KEY` in `.env.local`.
-3. Run the app:
+2. Run the app:
    `npm run dev`
-

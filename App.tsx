@@ -19,18 +19,55 @@ import {
 import SignatureCanvasComponent from './components/SignatureCanvas';
 import PublicForm from './components/PublicForm';
 import { extractCrewMembersFromFile, normalizePhone } from './services/documentExtraction';
-
-declare const PDFLib: any;
+import { extractCsvFileUrl, keepLatestTallySubmissions, normalizeCsvHeader, parseTallyCsvFile } from './services/tallyCsv';
 
 const STORAGE_KEY = 'setdocs_app_data_v4';
 const THEME_KEY = 'setdocs_theme';
 
+const getFormDataValue = (formData: Record<string, unknown>, label: string): string => {
+  const normalizedLabel = normalizeCsvHeader(label);
+  const aliases: string[] = [normalizedLabel];
+
+  if (normalizedLabel.includes('nome') || normalizedLabel.includes('name')) aliases.push('nome', 'nome e cognome', 'full name');
+  if (normalizedLabel.includes('codice fiscale') || normalizedLabel === 'cf') aliases.push('cf', 'codice fiscale');
+  if (normalizedLabel.includes('data nascita') || normalizedLabel.includes('birth')) aliases.push('data nascita', 'data di nascita', 'birth date');
+  if (normalizedLabel.includes('luogo nascita') || normalizedLabel.includes('place of birth')) aliases.push('luogo nascita', 'luogo di nascita', 'birth place');
+  if (normalizedLabel === 'data' || normalizedLabel === 'date') aliases.push('data nascita', 'data di nascita');
+
+  const normalizedAliases = aliases.map(normalizeCsvHeader);
+  for (const [key, value] of Object.entries(formData)) {
+    if (value === null || value === undefined || value === '') continue;
+    const normalizedKey = normalizeCsvHeader(key);
+    const matches = normalizedAliases.some(alias =>
+      normalizedKey === alias ||
+      normalizedKey.replace(/\s/g, '') === alias.replace(/\s/g, '') ||
+      (alias.length > 3 && normalizedKey.includes(alias)) ||
+      (normalizedKey.length > 3 && alias.includes(normalizedKey))
+    );
+    if (matches) return String(value);
+  }
+
+  return '';
+};
+
+const getSignatureUrl = (formData: Record<string, unknown>): string => {
+  for (const [key, value] of Object.entries(formData)) {
+    const normalizedKey = normalizeCsvHeader(key);
+    const stringValue = String(value || '');
+    if (normalizedKey.includes('firma') || normalizedKey.includes('signature') || stringValue.includes('storage.tally.so')) {
+      const url = extractCsvFileUrl(stringValue);
+      if (url) return url;
+    }
+  }
+  return '';
+};
+
 const INITIAL_DATA: AppState = {
   productions: [
-    { id: 'p1', title: 'Il Grande Set', notes: 'Cortometraggio d\'esordio', createdAt: new Date().toISOString(), producerPhone: '393330000000' }
+    { id: 'p1', title: 'Produzione Demo', notes: 'Progetto dimostrativo', createdAt: new Date().toISOString(), producerPhone: '+390000000000' }
   ],
   people: [
-    { id: 'per1', productionId: 'p1', name: 'Marco Gialli', role: 'DOP', department: 'Camera', whatsapp: '393330000000', hubToken: crypto.randomUUID() }
+    { id: 'per1', productionId: 'p1', name: 'Membro Demo', role: 'DOP', department: 'Camera', whatsapp: '+390000000000', hubToken: crypto.randomUUID() }
   ],
   templates: [
     { 
@@ -89,7 +126,7 @@ const App: React.FC = () => {
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [isProdListOpen, setIsProdListOpen] = useState(false);
   const [isParsingDoc, setIsParsingDoc] = useState(false);
-  const [isSyncingTally, setIsSyncingTally] = useState(false);
+  const [isImportingTallyCsv, setIsImportingTallyCsv] = useState(false);
   const [pendingImportMembers, setPendingImportMembers] = useState<Person[] | null>(null);
   const [editingPendingMember, setEditingPendingMember] = useState<Person | null>(null);
   const [expandedSignedPersonId, setExpandedSignedPersonId] = useState<string | null>(null);
@@ -113,6 +150,7 @@ const App: React.FC = () => {
 
   const docxInputRef = useRef<HTMLInputElement>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
+  const tallyCsvInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data]);
   useEffect(() => { 
@@ -132,50 +170,6 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
-
-  useEffect(() => {
-    if (!selectedProdId) return;
-
-    const fetchStatus = async () => {
-      try {
-        const res = await fetch(`/api/tally?action=status&pid=${selectedProdId}`);
-        if (!res.ok) return;
-        
-        const contentType = res.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-          console.error('Expected JSON, got:', contentType);
-          return;
-        }
-
-        const deliveries = await res.json();
-
-        if (Array.isArray(deliveries) && deliveries.length > 0) {
-          setData(prev => ({
-            ...prev,
-            people: prev.people.map(p => {
-              if (p.productionId === selectedProdId) {
-                const delivery = deliveries.find(d => d.mid === p.id);
-                if (delivery && !p.deliveredAt) {
-                  return { ...p, deliveredAt: delivery.deliveredAt };
-                }
-              }
-              return p;
-            })
-          }));
-        }
-      } catch (e: any) {
-        if (e.message === 'Failed to fetch') {
-          // Ignore network errors during polling (e.g. server restarting)
-          return;
-        }
-        console.error('Polling Tally Status Error:', e);
-      }
-    };
-
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 60000);
-    return () => clearInterval(interval);
-  }, [selectedProdId]);
 
   const activeProduction = useMemo(() => data.productions.find(p => p.id === selectedProdId), [selectedProdId, data.productions]);
   const prodPeople = useMemo(() => data.people.filter(p => p.productionId === selectedProdId && !p.removedAt), [selectedProdId, data.people]);
@@ -313,11 +307,12 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
     }));
   };
 
-  const generateFilledPdf = async (template: Template, formData: any, signatureUrl: string) => {
+  const generateFilledPdf = async (template: Template, formData: Record<string, unknown>, signatureUrl: string) => {
     try {
       // Fetch the blank PDF
       const existingPdfBytes = await fetch(template.fileUrl).then(res => res.arrayBuffer());
-      const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
+      const { PDFDocument } = await import('pdf-lib');
+      const pdfDoc = await PDFDocument.load(existingPdfBytes);
       const pages = pdfDoc.getPages();
 
       // Embed signature if available
@@ -356,12 +351,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
             height: sigHeight,
           });
         } else if (field.type === 'text' || field.type === 'date') {
-          let text = '';
-          const labelLower = field.label.toLowerCase();
-          if (labelLower.includes('nome') || labelLower.includes('name')) text = formData.nome || '';
-          else if (labelLower.includes('codice fiscale') || labelLower.includes('cf')) text = formData.cf || '';
-          else if (labelLower.includes('data') || labelLower.includes('date')) text = formData.dataNascita || new Date().toLocaleDateString();
-          else text = formData[field.id] || formData[field.label] || '';
+          const text = getFormDataValue(formData, field.label) || getFormDataValue(formData, field.id);
 
           if (text) {
             page.drawText(text, {
@@ -373,8 +363,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
         }
       }
 
-      const pdfBytes = await pdfDoc.saveAsBase64({ dataUri: true });
-      return pdfBytes;
+      return pdfDoc.save();
     } catch (error) {
       console.error("PDF Generation Error:", error);
       throw error;
@@ -423,7 +412,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
       const form = pdfDoc.getForm();
 
       // Get person data
-      let formData: any = null;
+      let formData: Record<string, unknown> | null = null;
       if (selectedPersonForTemplate.fieldsJSON) {
         try {
           formData = JSON.parse(selectedPersonForTemplate.fieldsJSON);
@@ -438,25 +427,15 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
         }
       }
 
-      if (formData) {
+      let pdfBytesOut: Uint8Array;
+      if (formData && template.fields.length > 0) {
+        pdfBytesOut = await generateFilledPdf(template, formData, getSignatureUrl(formData));
+      } else {
+        if (formData) {
         const fields = form.getFields();
         for (const field of fields) {
           const fieldName = field.getName();
-          
-          let matchedValue = null;
-          for (const [key, value] of Object.entries(formData)) {
-            const normalizedKey = key.toLowerCase().trim();
-            const normalizedFieldName = fieldName.toLowerCase().trim();
-            
-            if (
-              normalizedFieldName === normalizedKey || 
-              (normalizedKey.length > 3 && normalizedFieldName.includes(normalizedKey)) ||
-              (normalizedFieldName.length > 3 && normalizedKey.includes(normalizedFieldName))
-            ) {
-              matchedValue = value;
-              break;
-            }
-          }
+          const matchedValue = getFormDataValue(formData, fieldName);
 
           if (matchedValue) {
             try {
@@ -468,12 +447,13 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
             }
           }
         }
+        }
+
+        form.flatten();
+
+        // Save the PDF
+        pdfBytesOut = await pdfDoc.save();
       }
-
-      form.flatten();
-
-      // Save the PDF
-      const pdfBytesOut = await pdfDoc.save();
       const blob = new Blob([pdfBytesOut as any], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -493,86 +473,79 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
     }
   };
 
-  const handleSyncTally = async () => {
-    if (!selectedProdId || !activeProduction) return;
-    
-    const formLink = activeProduction.formLink || '';
-    const formIdMatch = formLink.match(/tally\.so\/r\/([^?]+)/);
-    const formId = formIdMatch ? formIdMatch[1] : null;
+  const handleTallyCsvSelection = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedProdId) return;
 
-    if (!formId) {
-      alert("Configura un link Tally valido (es. https://tally.so/r/ID) nelle impostazioni della produzione.");
-      setIsSettingsModalOpen(true);
-      return;
-    }
-
-    setIsSyncingTally(true);
+    setIsImportingTallyCsv(true);
     try {
-      const res = await fetch('/api/tally?action=sync-submissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ formId, people: prodPeople })
-      });
-      
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Errore durante la sincronizzazione con Tally");
-      }
-      
-      const { matchedSubmissions, unmatchedSubmissions } = await res.json();
-      
-      if ((!matchedSubmissions || matchedSubmissions.length === 0) && (!unmatchedSubmissions || unmatchedSubmissions.length === 0)) {
-        alert("Nessuna sottomissione trovata su Tally.");
-        setIsSyncingTally(false);
-        return;
+      const parsed = await parseTallyCsvFile(file);
+      const submissionsForProduction = parsed.submissions.filter(submission =>
+        !submission.productionId || submission.productionId === selectedProdId
+      );
+      const excludedProductions = parsed.submissions.length - submissionsForProduction.length;
+
+      if (submissionsForProduction.length === 0) {
+        throw new Error('Il CSV contiene risposte riferite a un’altra produzione. Seleziona il progetto corretto e riprova.');
       }
 
-      let updatedPeople = [...data.people];
-      let updatedInstances = [...data.instances];
-      let newNotifications = [...data.notifications];
+      const submissions = keepLatestTallySubmissions(submissionsForProduction);
+      const duplicateResponses = submissionsForProduction.length - submissions.length;
+      const updatedPeople = data.people.map(person => ({ ...person }));
+      const updatedNotifications = [...data.notifications];
+      const normalizeName = (name: string) => name.toLowerCase().trim().replace(/\s+/g, ' ');
+      let createdPeople = 0;
+      let updatedExistingPeople = 0;
 
-      const submissionsToProcess: { person: Person, sub: any }[] = [];
+      submissions.forEach(submission => {
+        let personIndex = submission.personId
+          ? updatedPeople.findIndex(person =>
+              person.id === submission.personId && person.productionId === selectedProdId && !person.removedAt
+            )
+          : -1;
 
-      // Add matched
-      for (const sub of (matchedSubmissions || [])) {
-        const person = updatedPeople.find(p => p.id === sub.personId);
-        if (person) submissionsToProcess.push({ person, sub });
-      }
+        if (personIndex < 0) {
+          personIndex = updatedPeople.findIndex(person =>
+            person.productionId === selectedProdId &&
+            !person.removedAt &&
+            normalizeName(person.name) === normalizeName(submission.name)
+          );
+        }
 
-      const normalizeName = (n: string) => n ? n.toLowerCase().trim().replace(/\s+/g, ' ') : '';
-
-      // Add unmatched (create new people)
-      for (const sub of (unmatchedSubmissions || [])) {
-        // Try to find by name again just in case
-        const nome = sub.formData.nome || sub.formData['Nome e Cognome'] || sub.formData['nome e cognome'] || 'Sconosciuto';
-        let person = updatedPeople.find(p => p.productionId === selectedProdId && normalizeName(p.name) === normalizeName(nome));
-        
-        if (!person) {
-          person = {
-            id: crypto.randomUUID(),
+        if (personIndex < 0) {
+          const canReuseImportedId = Boolean(submission.personId) &&
+            !updatedPeople.some(person => person.id === submission.personId);
+          const newPerson: Person = {
+            id: canReuseImportedId ? submission.personId : `per-${crypto.randomUUID()}`,
             productionId: selectedProdId,
-            name: nome,
-            role: 'Membro Troupe',
+            name: submission.name,
+            role: submission.role || 'Membro Troupe',
             department: 'Generico',
-            whatsapp: sub.formData['Telefono'] || sub.formData['Cellulare'] || '',
-            deliveredAt: sub.submittedAt,
+            whatsapp: normalizePhone(submission.phone),
+            deliveredAt: submission.submittedAt,
+            fieldsJSON: JSON.stringify(submission.formData),
             hubToken: crypto.randomUUID()
           };
-          updatedPeople.push(person);
+          updatedPeople.push(newPerson);
+          personIndex = updatedPeople.length - 1;
+          createdPeople += 1;
+        } else {
+          const existing = updatedPeople[personIndex];
+          updatedPeople[personIndex] = {
+            ...existing,
+            role: existing.role || submission.role || 'Membro Troupe',
+            whatsapp: existing.whatsapp || normalizePhone(submission.phone),
+            deliveredAt: submission.submittedAt,
+            fieldsJSON: JSON.stringify(submission.formData)
+          };
+          updatedExistingPeople += 1;
         }
-        submissionsToProcess.push({ person, sub });
-      }
 
-      // Process all concurrently
-      submissionsToProcess.forEach(({ person, sub }) => {
-        if (!person.deliveredAt) {
-          person.deliveredAt = sub.submittedAt;
-        }
-        person.fieldsJSON = JSON.stringify(sub.formData);
-        
-        // Add a notification if it's new
-        if (!data.notifications.some(n => n.personId === person.id && n.type === 'DOCUMENT_SIGNED')) {
-          newNotifications.push({
+        const person = updatedPeople[personIndex];
+        if (!updatedNotifications.some(notification =>
+          notification.personId === person.id && notification.type === 'DOCUMENT_SIGNED'
+        )) {
+          updatedNotifications.push({
             id: crypto.randomUUID(),
             productionId: selectedProdId,
             personId: person.id,
@@ -589,15 +562,21 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
       setData(prev => ({
         ...prev,
         people: updatedPeople,
-        instances: updatedInstances,
-        notifications: newNotifications
+        notifications: updatedNotifications
       }));
-      
-      alert(`Sincronizzazione completata: ${submissionsToProcess.length} sottomissioni elaborate.`);
+
+      const ignored = parsed.skippedRows + excludedProductions + duplicateResponses;
+      alert(
+        `Importazione CSV completata: ${submissions.length} risposte elaborate, ` +
+        `${createdPeople} nuovi membri e ${updatedExistingPeople} membri aggiornati.` +
+        (ignored > 0 ? ` ${ignored} righe duplicate, vuote o di altri progetti sono state ignorate.` : '')
+      );
+      setActiveTab('SIGNED');
     } catch (err: any) {
-      alert(err.message);
+      alert(err.message || 'Errore durante la lettura del CSV di Tally.');
     } finally {
-      setIsSyncingTally(false);
+      setIsImportingTallyCsv(false);
+      if (tallyCsvInputRef.current) tallyCsvInputRef.current.value = '';
     }
   };
 
@@ -754,6 +733,13 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex overflow-hidden transition-all duration-300 font-sans">
+      <input
+        type="file"
+        ref={tallyCsvInputRef}
+        accept=".csv,text/csv"
+        onChange={handleTallyCsvSelection}
+        className="hidden"
+      />
       
       {isSidebarOpen && <div className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
       
@@ -881,8 +867,8 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
                   <p className="text-slate-500 text-sm font-medium">Gestisci la troupe del film e raccogli i dati.</p>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  <button onClick={handleSyncTally} disabled={isSyncingTally} className="px-6 py-4 bg-amber-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-700 shadow-xl shadow-amber-600/20 flex items-center gap-2 transition-all disabled:opacity-50">
-                    <RefreshCw className={`w-4 h-4 ${isSyncingTally ? 'animate-spin' : ''}`} /> SINCRONIZZA
+                  <button onClick={() => tallyCsvInputRef.current?.click()} disabled={isImportingTallyCsv} className="px-6 py-4 bg-amber-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-700 shadow-xl shadow-amber-600/20 flex items-center gap-2 transition-all disabled:opacity-50" title="Importa il CSV scaricato dalla sezione Submissions di Tally">
+                    {isImportingTallyCsv ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} IMPORTA CSV
                   </button>
                   <button onClick={() => setIsRecipientModalOpen(true)} className="px-6 py-4 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-600/20 flex items-center gap-2 transition-all">
                     <Send className="w-4 h-4" /> INVIA MODULO
@@ -976,8 +962,8 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
                   <h2 className="text-3xl font-black text-slate-900 dark:text-white">Risposte Form</h2>
                   <p className="text-slate-500 text-sm font-medium">Membri che hanno completato il form.</p>
                 </div>
-                <button onClick={handleSyncTally} disabled={isSyncingTally} className="px-6 py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 flex items-center gap-2 transition-all disabled:opacity-50">
-                  <RefreshCw className={`w-4 h-4 ${isSyncingTally ? 'animate-spin' : ''}`} /> Sincronizza Tally
+                <button onClick={() => tallyCsvInputRef.current?.click()} disabled={isImportingTallyCsv} className="px-6 py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 flex items-center gap-2 transition-all disabled:opacity-50" title="Importa il CSV scaricato dalla sezione Submissions di Tally">
+                  {isImportingTallyCsv ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} Importa CSV
                 </button>
               </div>
 
@@ -1044,20 +1030,22 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
                                 lowerKey === 'mid' || 
                                 lowerKey === 'data emissione' || 
                                 lowerKey === 'data di emissione' || 
-                                lowerKey === 'scadenza' ||
-                                lowerKey === 'datanascita' ||
-                                lowerKey === 'cf'
+                                 lowerKey === 'scadenza' ||
+                                 lowerKey === 'datanascita' ||
+                                 lowerKey === 'luogonascita' ||
+                                 lowerKey === 'cf'
                               ) return null;
 
                               // Check if it's a signature/file link
+                              const signatureUrl = extractCsvFileUrl(strValue);
                               const isFirma = lowerKey.includes('firma') || lowerKey.includes('signature') || strValue.includes('storage.tally.so');
 
                               return (
                                 <div key={key} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-white/5">
                                   <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider mb-1">{key}</p>
-                                  {isFirma ? (
+                                  {isFirma && signatureUrl ? (
                                     <a 
-                                      href={strValue} 
+                                      href={signatureUrl} 
                                       target="_blank" 
                                       rel="noopener noreferrer"
                                       download="firma.jpg"
@@ -1396,4 +1384,3 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
 };
 
 export default App;
-

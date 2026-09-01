@@ -4,7 +4,6 @@ import cors from 'cors';
 import path from 'path';
 
 // Import API handlers
-import tallyHandler from './api/tally.ts';
 import signHandler from './api/sign.ts';
 import uploadPdfHandler from './api/upload-pdf.ts';
 import whatsappHandler from './api/whatsapp.ts';
@@ -18,15 +17,6 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // API routes FIRST
-  app.all('/api/tally', async (req, res) => {
-    try {
-      await tallyHandler(req, res);
-    } catch (e) {
-      console.error(e);
-      res.status(500).json({ error: 'Internal Server Error' });
-    }
-  });
-
   app.all('/api/sign', async (req, res) => {
     try {
       await signHandler(req, res);
