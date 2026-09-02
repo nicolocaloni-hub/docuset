@@ -19,48 +19,15 @@ import {
 import SignatureCanvasComponent from './components/SignatureCanvas';
 import PublicForm from './components/PublicForm';
 import { extractCrewMembersFromFile, normalizePhone } from './services/documentExtraction';
-import { extractCsvFileUrl, keepLatestTallySubmissions, normalizeCsvHeader, parseTallyCsvFile } from './services/tallyCsv';
+import { extractCsvFileUrl, keepLatestTallySubmissions, parseTallyCsvFile } from './services/tallyCsv';
+import {
+  fillPdfTemplateAutomatically,
+  getPdfFormDataValue,
+  getPdfSignatureSource,
+} from './services/pdfTemplateFilling';
 
 const STORAGE_KEY = 'setdocs_app_data_v4';
 const THEME_KEY = 'setdocs_theme';
-
-const getFormDataValue = (formData: Record<string, unknown>, label: string): string => {
-  const normalizedLabel = normalizeCsvHeader(label);
-  const aliases: string[] = [normalizedLabel];
-
-  if (normalizedLabel.includes('nome') || normalizedLabel.includes('name')) aliases.push('nome', 'nome e cognome', 'full name');
-  if (normalizedLabel.includes('codice fiscale') || normalizedLabel === 'cf') aliases.push('cf', 'codice fiscale');
-  if (normalizedLabel.includes('data nascita') || normalizedLabel.includes('birth')) aliases.push('data nascita', 'data di nascita', 'birth date');
-  if (normalizedLabel.includes('luogo nascita') || normalizedLabel.includes('place of birth')) aliases.push('luogo nascita', 'luogo di nascita', 'birth place');
-  if (normalizedLabel === 'data' || normalizedLabel === 'date') aliases.push('data nascita', 'data di nascita');
-
-  const normalizedAliases = aliases.map(normalizeCsvHeader);
-  for (const [key, value] of Object.entries(formData)) {
-    if (value === null || value === undefined || value === '') continue;
-    const normalizedKey = normalizeCsvHeader(key);
-    const matches = normalizedAliases.some(alias =>
-      normalizedKey === alias ||
-      normalizedKey.replace(/\s/g, '') === alias.replace(/\s/g, '') ||
-      (alias.length > 3 && normalizedKey.includes(alias)) ||
-      (normalizedKey.length > 3 && alias.includes(normalizedKey))
-    );
-    if (matches) return String(value);
-  }
-
-  return '';
-};
-
-const getSignatureUrl = (formData: Record<string, unknown>): string => {
-  for (const [key, value] of Object.entries(formData)) {
-    const normalizedKey = normalizeCsvHeader(key);
-    const stringValue = String(value || '');
-    if (normalizedKey.includes('firma') || normalizedKey.includes('signature') || stringValue.includes('storage.tally.so')) {
-      const url = extractCsvFileUrl(stringValue);
-      if (url) return url;
-    }
-  }
-  return '';
-};
 
 const INITIAL_DATA: AppState = {
   productions: [
@@ -351,7 +318,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
             height: sigHeight,
           });
         } else if (field.type === 'text' || field.type === 'date') {
-          const text = getFormDataValue(formData, field.label) || getFormDataValue(formData, field.id);
+          const text = getPdfFormDataValue(formData, field.label) || getPdfFormDataValue(formData, field.id);
 
           if (text) {
             page.drawText(text, {
@@ -403,13 +370,9 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
       const template = data.templates.find(t => t.id === selectedTemplateId);
       if (!template) throw new Error("Template non trovato");
 
-      // Fetch the PDF template
-      const pdfBytes = await fetch(template.fileUrl).then(res => res.arrayBuffer());
-      
-      // Load the PDFDocument
-      const { PDFDocument } = await import('pdf-lib');
-      const pdfDoc = await PDFDocument.load(pdfBytes);
-      const form = pdfDoc.getForm();
+      const templateResponse = await fetch(template.fileUrl);
+      if (!templateResponse.ok) throw new Error('Non riesco ad aprire il template PDF selezionato.');
+      const pdfBytes = await templateResponse.arrayBuffer();
 
       // Get person data
       let formData: Record<string, unknown> | null = null;
@@ -427,32 +390,30 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
         }
       }
 
-      let pdfBytesOut: Uint8Array;
-      if (formData && template.fields.length > 0) {
-        pdfBytesOut = await generateFilledPdf(template, formData, getSignatureUrl(formData));
-      } else {
-        if (formData) {
-        const fields = form.getFields();
-        for (const field of fields) {
-          const fieldName = field.getName();
-          const matchedValue = getFormDataValue(formData, fieldName);
+      if (!formData) {
+        throw new Error('Per questa persona non sono disponibili dati importati da Tally.');
+      }
 
-          if (matchedValue) {
-            try {
-              if (field.constructor.name === 'PDFTextField') {
-                form.getTextField(fieldName).setText(String(matchedValue));
-              }
-            } catch (e) {
-              console.error(`Errore compilazione campo ${fieldName}:`, e);
-            }
+      const completeFormData = { nome: selectedPersonForTemplate.name, ...formData };
+      let pdfBytesOut: Uint8Array;
+      if (template.fields.length > 0) {
+        pdfBytesOut = await generateFilledPdf(template, completeFormData, getPdfSignatureSource(completeFormData));
+      } else {
+        const signatureSource = getPdfSignatureSource(completeFormData);
+        let signatureBytes: ArrayBuffer | undefined;
+        if (signatureSource) {
+          try {
+            const signatureResponse = await fetch(signatureSource);
+            if (!signatureResponse.ok) throw new Error(`HTTP ${signatureResponse.status}`);
+            signatureBytes = await signatureResponse.arrayBuffer();
+          } catch (error) {
+            console.error('Errore download firma:', error);
+            throw new Error('Non riesco a scaricare la firma indicata nel CSV. Verifica che il collegamento Tally sia ancora valido.');
           }
         }
-        }
 
-        form.flatten();
-
-        // Save the PDF
-        pdfBytesOut = await pdfDoc.save();
+        const result = await fillPdfTemplateAutomatically(pdfBytes, completeFormData, signatureBytes);
+        pdfBytesOut = result.pdfBytes;
       }
       const blob = new Blob([pdfBytesOut as any], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
@@ -467,7 +428,7 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
       setSelectedTemplateId('');
     } catch (error) {
       console.error("Errore generazione PDF:", error);
-      alert("Errore durante la generazione del PDF.");
+      alert(error instanceof Error ? error.message : 'Errore durante la generazione del PDF.');
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -1384,3 +1345,4 @@ ricordati di firmare i documenti necessari per il set di '${activeProduction?.ti
 };
 
 export default App;
+
