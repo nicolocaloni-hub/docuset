@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Compass, Download, LogOut, Plus, Trash2, Upload, UsersRound, X } from 'lucide-react';
+import { Compass, Download, LogOut, Plus, Trash2, Upload, X } from 'lucide-react';
 import type { AppState, FormField, Person, Production, Template } from '../types';
 import { PRESET_FIELDS, productionFields } from '../lib/forms';
 import { DEFAULT_INVITE_TEMPLATE, DEFAULT_SOLICIT_TEMPLATE, TEMPLATE_VARIABLES, missingVariables } from '../services/whatsapp';
@@ -65,11 +65,9 @@ export const SettingsModal: React.FC<{
   onDeleteProduction: () => void;
   onRestore: (state: AppState) => void;
   onRestartTour: () => void;
-  /** Solo per chi gestisce DocuSet. */
-  onOpenAdmin?: () => void;
   onSignOut?: () => void;
   onClose: () => void;
-}> = ({ production, data, accountEmail, formsEnabled, onSave, onDeleteProduction, onRestore, onRestartTour, onOpenAdmin, onSignOut, onClose }) => {
+}> = ({ production, data, accountEmail, formsEnabled, onSave, onDeleteProduction, onRestore, onRestartTour, onSignOut, onClose }) => {
   const [title, setTitle] = useState(production.title);
   const [fields, setFields] = useState<FormField[]>(productionFields(production));
   const [customLabel, setCustomLabel] = useState('');
@@ -189,16 +187,6 @@ export const SettingsModal: React.FC<{
           </div>
           <Button variant="secondary" onClick={onRestartTour} icon={<Compass className="h-4 w-4" />}>Rivedi la guida</Button>
         </div>
-
-        {onOpenAdmin && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
-            <div>
-              <h3 className="font-display text-xl font-bold">Utenti</h3>
-              <p className="mt-1 text-sm text-ink-soft">Chi si è registrato a DocuSet e quanto lo usa.</p>
-            </div>
-            <Button variant="secondary" onClick={onOpenAdmin} icon={<UsersRound className="h-4 w-4" />}>Apri pannello</Button>
-          </div>
-        )}
 
         <div className="border-t border-line pt-5">
           <h3 className="font-display text-xl font-bold">Backup</h3>

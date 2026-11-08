@@ -16,7 +16,6 @@ import SequenceBar, { type SendQueue } from './components/SequenceBar';
 import Tour, { TOUR_DONE_KEY } from './components/Tour';
 import InstallPrompt from './components/InstallPrompt';
 import ProfileSetup from './components/ProfileSetup';
-import AdminPanel from './views/Admin';
 import PublicForm from './views/PublicForm';
 import Dashboard from './views/Dashboard';
 import PeopleList from './views/PeopleList';
@@ -67,11 +66,6 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
   const [refreshing, setRefreshing] = useState(false);
   const [queue, setQueue] = useState<SendQueue | null>(null);
   // La guida parte da sola solo la prima volta; poi si riapre dalle Impostazioni.
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
-  useEffect(() => {
-    if (supabase && userId) supabase.rpc('is_admin').then(({ data: admin }) => setIsAdmin(admin === true));
-  }, [userId]);
   const [tourOpen, setTourOpen] = useState(() => {
     try { return !localStorage.getItem(TOUR_DONE_KEY); } catch { return false; }
   });
@@ -477,7 +471,6 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       </nav>
 
       {tourOpen && <Tour onClose={() => setTourOpen(false)} />}
-      {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
       <InstallPrompt hidden={tourOpen || Boolean(queue) || dialog !== null} />
 
       {queue && (
@@ -505,7 +498,6 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
           onDeleteProduction={() => setDialog({ kind: 'delete-production' })}
           onRestore={restoreBackup}
           onRestartTour={() => { setDialog(null); setTab('DASHBOARD'); setTourOpen(true); }}
-          onOpenAdmin={isAdmin ? () => { setDialog(null); setAdminOpen(true); } : undefined}
           onSignOut={supabase && userId ? () => { supabase?.auth.signOut(); } : undefined} />
       )}
       {dialog?.kind === 'import' && (
