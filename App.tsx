@@ -13,6 +13,8 @@ import { Button, ToastProvider, useToast } from './components/ui';
 import { ConfirmModal, GeneratePdfModal, ImportReviewModal, PersonModal, ProductionModal, SettingsModal, type PersonDraft } from './components/modals';
 import Login from './components/Login';
 import SequenceBar, { type SendQueue } from './components/SequenceBar';
+import Tour, { TOUR_DONE_KEY } from './components/Tour';
+import InstallPrompt from './components/InstallPrompt';
 import PublicForm from './views/PublicForm';
 import Dashboard from './views/Dashboard';
 import PeopleList from './views/PeopleList';
@@ -62,6 +64,10 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
   const [formTokens, setFormTokens] = useState<Map<string, string>>(new Map());
   const [refreshing, setRefreshing] = useState(false);
   const [queue, setQueue] = useState<SendQueue | null>(null);
+  // La guida parte da sola solo la prima volta; poi si riapre dalle Impostazioni.
+  const [tourOpen, setTourOpen] = useState(() => {
+    try { return !localStorage.getItem(TOUR_DONE_KEY); } catch { return false; }
+  });
   const dataRef = useRef(data);
   dataRef.current = data;
 
@@ -355,6 +361,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
   const productionSwitcher = (className: string) => (
     <select
       aria-label="Produzione attiva"
+      data-tour="production"
       value={production.id}
       onChange={e => { if (e.target.value === '__new') setDialog({ kind: 'production' }); else setSelectedId(e.target.value); }}
       className={className}
@@ -382,7 +389,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
         </div>
         <nav className="mt-6 flex flex-col gap-px px-3" aria-label="Sezioni">
           {NAV.map(item => (
-            <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}
+            <button key={item.id} type="button" data-tour={`nav-${item.id}`} onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}
               className={`flex min-h-11 items-center gap-3 rounded-[3px] px-3 text-left text-sm transition-colors ${tab === item.id ? 'bg-manila text-ink font-medium' : 'text-ink-soft hover:bg-ink/5 hover:text-ink'}`}>
               <item.icon className="h-4 w-4" />
               <span className="flex-1">{item.label}</span>
@@ -391,7 +398,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
           ))}
         </nav>
         <div className="mt-auto border-t border-line p-3">
-          <button type="button" onClick={() => setDialog({ kind: 'settings' })}
+          <button type="button" data-tour="settings" onClick={() => setDialog({ kind: 'settings' })}
             className="flex min-h-11 w-full items-center gap-3 rounded-[3px] px-3 text-sm text-ink-soft hover:bg-ink/5 hover:text-ink">
             <Settings className="h-4 w-4" /> Impostazioni
           </button>
@@ -408,7 +415,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
         <div className="ml-auto min-w-0 max-w-[55%]">
           {productionSwitcher('w-full min-h-10 truncate rounded-[3px] border border-line bg-card px-2 text-sm text-ink outline-none')}
         </div>
-        <button type="button" aria-label="Impostazioni" onClick={() => setDialog({ kind: 'settings' })} className="inline-flex h-10 w-10 items-center justify-center text-ink-soft">
+        <button type="button" aria-label="Impostazioni" data-tour="settings" onClick={() => setDialog({ kind: 'settings' })} className="inline-flex h-10 w-10 items-center justify-center text-ink-soft">
           <Settings className="h-5 w-5" />
         </button>
       </header>
@@ -450,7 +457,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       {/* Navigazione telefono */}
       <nav aria-label="Sezioni" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-ink/10 bg-paper pb-[env(safe-area-inset-bottom)] lg:hidden">
         {NAV.map(item => (
-          <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}
+          <button key={item.id} type="button" data-tour={`nav-${item.id}`} onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}
             className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] ${tab === item.id ? 'text-ink' : 'text-ink-soft'}`}>
             {tab === item.id && <span aria-hidden className="absolute inset-x-3 top-0 h-1 bg-manila" />}
             <item.icon className="h-5 w-5" />
@@ -461,6 +468,9 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
           </button>
         ))}
       </nav>
+
+      {tourOpen && <Tour onClose={() => setTourOpen(false)} />}
+      <InstallPrompt hidden={tourOpen || Boolean(queue) || dialog !== null} />
 
       {queue && (
         <SequenceBar queue={queue}
@@ -486,6 +496,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
           onSave={patch => { setData(prev => ({ ...prev, productions: prev.productions.map(p => (p.id === production.id ? { ...p, ...patch } : p)) })); setDialog(null); toast('Impostazioni salvate.'); }}
           onDeleteProduction={() => setDialog({ kind: 'delete-production' })}
           onRestore={restoreBackup}
+          onRestartTour={() => { setDialog(null); setTab('DASHBOARD'); setTourOpen(true); }}
           onSignOut={supabase && userId ? () => { supabase?.auth.signOut(); } : undefined} />
       )}
       {dialog?.kind === 'import' && (
