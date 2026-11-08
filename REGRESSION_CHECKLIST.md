@@ -7,9 +7,9 @@
 - [x] **Rename Production**: Header title is editable and saves correctly.
 - [x] Menu items click leads to correct sections.
 
-## Dashboard
-- [x] **3-Card Layout**: Grid shows Crew count, Template count, and Pending count.
-- [x] All 3 dashboard cards are clickable and navigate to correct tabs.
+## Dashboard (Situazione)
+- [x] Contatore consegnati/totale con barra a strisce per stato.
+- [x] Lista "Da sollecitare" con pulsante WhatsApp; avviso se manca il link Tally.
 
 ## People (Cast & Crew)
 - [x] List of members is visible for the active production.
@@ -33,7 +33,9 @@
 - [x] "Nuovo Progetto" modal works.
 - [x] Clicking a project card switches the global active production.
 
-## Public Form
-- [x] Public signing link renders correctly.
-- [x] Signature canvas allows drawing.
-- [x] Form submission marked as successful.
+## Dati e accesso
+- [x] Senza variabili Supabase l'app lavora in locale (localStorage) come prima.
+- [x] Con Supabase: login via link email, dati per utente, template in bucket privato.
+- [x] Al primo accesso i dati del browser vengono importati online.
+- [x] Backup JSON: esporta e ripristina dalle Impostazioni.
+- [x] Su telefono: navigazione in basso e pulsante + per aggiungere persone.
