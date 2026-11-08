@@ -5,10 +5,8 @@ import { type AppState, type Person, type Template, TemplateType } from './types
 import { supabase } from './lib/supabase';
 import { type SyncStatus, useAppData } from './lib/useAppData';
 import { deleteTemplateFile, fetchTemplateBytes, storeTemplateFile, templateFileUrl } from './lib/templateFiles';
-import { applySubmissions, deleteFormData, ensureFormLink, fetchFormState, formUrl, isSubmissionFile, submissionFileUrl, usesDocusetForm } from './lib/forms';
+import { applySubmissions, deleteFormData, ensureFormLink, fetchFormState, formUrl, isSubmissionFile, submissionFileUrl } from './lib/forms';
 import { extractCrewMembersFromFile, normalizePhone } from './services/documentExtraction';
-import { keepLatestTallySubmissions, parseTallyCsvFile } from './services/tallyCsv';
-import { mergeTallySubmissions } from './services/tallyMerge';
 import { buildMessage, whatsappUrl } from './services/whatsapp';
 import { buildPersonPdf } from './services/personPdf';
 import { Button, ToastProvider, useToast } from './components/ui';
@@ -56,9 +54,8 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
     try { return localStorage.getItem(ACTIVE_PRODUCTION_KEY); } catch { return null; }
   });
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [busy, setBusy] = useState({ document: false, csv: false, template: false, pdf: false });
+  const [busy, setBusy] = useState({ document: false, template: false, pdf: false });
   const documentInput = useRef<HTMLInputElement>(null);
-  const csvInput = useRef<HTMLInputElement>(null);
   const templateInput = useRef<HTMLInputElement>(null);
   const formsEnabled = Boolean(supabase && userId);
   const [formTokens, setFormTokens] = useState<Map<string, string>>(new Map());
@@ -120,35 +117,29 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
 
   const sendWhatsApp = async (person: Person) => {
     if (!production) return;
-    const docuset = usesDocusetForm(production, formsEnabled);
-    if (!docuset && !production.formLink) {
-      toast('Prima imposta il link del modulo Tally.', 'error');
-      setDialog({ kind: 'settings' });
+    if (!formsEnabled || !userId) {
+      toast('Il modulo funziona solo online: accedi con la tua email per mandare i link.', 'error');
       return;
     }
     const solicit = Boolean(person.sentAt);
-    const open = (link?: string) => whatsappUrl(person.whatsapp, buildMessage(solicit ? 'solicit' : 'invite', production, person, link), navigator.userAgent);
+    const open = (token: string) => whatsappUrl(person.whatsapp, buildMessage(solicit ? 'solicit' : 'invite', production, person, formUrl(token)), navigator.userAgent);
 
-    if (!docuset) {
-      window.open(open(), '_blank');
-    } else {
-      const known = formTokens.get(`${production.id}/${person.id}`);
-      // Senza token in memoria va creato: apro subito la finestra, dopo un await i browser bloccano i popup.
-      const win = known ? null : window.open('', '_blank');
-      try {
-        const token = known ?? await ensureFormLink(userId!, production, person);
-        if (known) {
-          window.open(open(formUrl(token)), '_blank');
-          ensureFormLink(userId!, production, person).catch(() => { /* aggiorna solo campi e scadenza */ });
-        } else {
-          setFormTokens(map => new Map(map).set(`${production.id}/${person.id}`, token));
-          if (win) win.location.href = open(formUrl(token)); else window.open(open(formUrl(token)), '_blank');
-        }
-      } catch (err) {
-        win?.close();
-        toast(err instanceof Error ? err.message : 'Non riesco a creare il link del modulo.', 'error');
-        return;
+    const known = formTokens.get(`${production.id}/${person.id}`);
+    // Senza token in memoria va creato: apro subito la finestra, dopo un await i browser bloccano i popup.
+    const win = known ? null : window.open('', '_blank');
+    try {
+      const token = known ?? await ensureFormLink(userId, production, person);
+      if (known) {
+        window.open(open(token), '_blank');
+        ensureFormLink(userId, production, person).catch(() => { /* aggiorna solo campi e scadenza */ });
+      } else {
+        setFormTokens(map => new Map(map).set(`${production.id}/${person.id}`, token));
+        if (win) win.location.href = open(token); else window.open(open(token), '_blank');
       }
+    } catch (err) {
+      win?.close();
+      toast(err instanceof Error ? err.message : 'Non riesco a creare il link del modulo.', 'error');
+      return;
     }
     updatePerson(person.id, solicit ? { solicitedAt: new Date().toISOString() } : { sentAt: new Date().toISOString() });
   };
@@ -202,31 +193,6 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
     }
   };
 
-  /* ---------- Import risposte Tally (CSV) ---------- */
-
-  const importCsv = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !productionId || !data) return;
-    setBusy(b => ({ ...b, csv: true }));
-    try {
-      const parsed = await parseTallyCsvFile(file);
-      const forProduction = parsed.submissions.filter(s => !s.productionId || s.productionId === productionId);
-      if (!forProduction.length) throw new Error('Il CSV contiene risposte di un’altra produzione. Seleziona il progetto corretto e riprova.');
-      const latest = keepLatestTallySubmissions(forProduction);
-      const merged = mergeTallySubmissions(data.people, latest, productionId);
-      setData(prev => ({ ...prev, people: merged.people }));
-      const ignored = parsed.skippedRows + (parsed.submissions.length - forProduction.length) + (forProduction.length - latest.length);
-      toast(`${latest.length} risposte importate: ${merged.created} persone nuove, ${merged.updated} aggiornate.` +
-        (ignored ? ` ${ignored} righe vuote, duplicate o di altri progetti ignorate.` : ''));
-      setTab('SIGNED');
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Errore nella lettura del CSV di Tally.', 'error');
-    } finally {
-      setBusy(b => ({ ...b, csv: false }));
-    }
-  };
-
   /* ---------- Template ---------- */
 
   const uploadTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -274,7 +240,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
     try {
       let formData: Record<string, unknown> | null = null;
       try { formData = person.fieldsJSON ? JSON.parse(person.fieldsJSON) : null; } catch { /* dati corrotti */ }
-      if (!formData) throw new Error('Per questa persona non ci sono dati importati da Tally.');
+      if (!formData) throw new Error('Questa persona non ha ancora compilato il modulo.');
       // File del modulo DocuSet: la firma diventa un link firmato, gli altri allegati non vanno nel PDF.
       const resolved: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(formData)) {
@@ -368,7 +334,6 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
   return (
     <div className="min-h-dvh lg:pl-64">
       <input ref={documentInput} type="file" accept=".docx,.pdf" hidden onChange={importDocument} />
-      <input ref={csvInput} type="file" accept=".csv,text/csv" hidden onChange={importCsv} />
       <input ref={templateInput} type="file" accept="application/pdf,.pdf" hidden onChange={uploadTemplate} />
 
       {/* Sidebar desktop */}
@@ -424,19 +389,19 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
         {tab === 'DASHBOARD' && (
           <Dashboard production={production} people={people} templatesCount={data.templates.length}
             onOpenPeople={() => setTab('PEOPLE')} onOpenPending={() => setTab('REQUESTS')} onOpenTemplates={() => setTab('TEMPLATES')}
-            onOpenSettings={() => setDialog({ kind: 'settings' })} onImportDocument={() => documentInput.current?.click()}
+            onImportDocument={() => documentInput.current?.click()}
             onAdd={() => setDialog({ kind: 'person' })} onSolicit={sendWhatsApp}
-            formReady={usesDocusetForm(production, formsEnabled) || Boolean(production.formLink)} />
+            formReady={formsEnabled} />
         )}
         {(tab === 'PEOPLE' || tab === 'REQUESTS') && (
           <PeopleList key={tab} mode={tab === 'PEOPLE' ? 'all' : 'pending'} people={people}
             onEdit={person => setDialog({ kind: 'person', person })} onAdd={() => setDialog({ kind: 'person' })}
             onDelete={person => setDialog({ kind: 'delete-person', person })} onWhatsApp={sendWhatsApp}
-            onImportDocument={() => documentInput.current?.click()} onImportCsv={() => csvInput.current?.click()}
-            busy={{ document: busy.document, csv: busy.csv }} />
+            onImportDocument={() => documentInput.current?.click()}
+            importing={busy.document} />
         )}
         {tab === 'SIGNED' && (
-          <Responses people={delivered} importing={busy.csv} onImportCsv={() => csvInput.current?.click()}
+          <Responses people={delivered}
             onGeneratePdf={person => setDialog({ kind: 'pdf', person })}
             onOpenFile={openSubmissionFile}
             onRefresh={formsEnabled ? () => refreshForms(true) : undefined} refreshing={refreshing} />

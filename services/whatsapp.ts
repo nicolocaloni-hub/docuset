@@ -11,27 +11,20 @@ export const TEMPLATE_VARIABLES = ['{{nome}}', '{{titolo_produzione}}', '{{link_
 /** Variabili obbligatorie che mancano nel testo del messaggio. */
 export const missingVariables = (text: string) => TEMPLATE_VARIABLES.filter(v => !text.includes(v));
 
-/** Link Tally personale: `pid` e `mid` permettono di ricollegare la risposta alla persona. */
-export const buildFormLink = (formLink: string, productionId: string, personId: string) => {
-  const separator = formLink.includes('?') ? '&' : '?';
-  return `${formLink}${separator}pid=${encodeURIComponent(productionId)}&mid=${encodeURIComponent(personId)}`;
-};
-
 export const buildMessage = (
   kind: 'invite' | 'solicit',
   production: Production,
   person: Person,
-  /** Link personale del modulo DocuSet; senza, si usa il link Tally con pid e mid. */
-  personalLink?: string,
+  /** Link personale del modulo DocuSet (/m/<token>). */
+  personalLink: string,
 ) => {
   const template = kind === 'invite'
     ? production.whatsappMessageTemplate || DEFAULT_INVITE_TEMPLATE
     : production.whatsappSolicitTemplate || DEFAULT_SOLICIT_TEMPLATE;
-  const link = personalLink ?? buildFormLink(production.formLink || '', production.id, person.id);
   return template
     .replace(/{{nome}}/g, person.name.split(' ')[0] || '')
     .replace(/{{titolo_produzione}}/g, production.title || '')
-    .replace(/{{link_form}}/g, link);
+    .replace(/{{link_form}}/g, personalLink);
 };
 
 export const whatsappUrl = (phone: string, message: string, userAgent: string) => {

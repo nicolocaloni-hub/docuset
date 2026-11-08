@@ -23,9 +23,6 @@ export const PRESET_FIELDS: FormField[] = [
 export const productionFields = (production: Production): FormField[] =>
   production.formFields?.length ? production.formFields : PRESET_FIELDS;
 
-export const usesDocusetForm = (production: Production, formsEnabled: boolean) =>
-  formsEnabled && production.formMode !== 'tally';
-
 export const formUrl = (token: string, origin = window.location.origin) => `${origin}/m/${token}`;
 
 const requireClient = () => {
