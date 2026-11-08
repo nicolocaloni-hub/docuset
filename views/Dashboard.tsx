@@ -22,10 +22,12 @@ interface Props {
   onImportDocument: () => void;
   onAdd: () => void;
   onSolicit: (person: Person) => void;
+  /** C'è un modulo da mandare (DocuSet attivo o link Tally impostato). */
+  formReady: boolean;
 }
 
 const Dashboard: React.FC<Props> = ({
-  production, people, templatesCount, onOpenPeople, onOpenPending, onOpenTemplates, onOpenSettings, onImportDocument, onAdd, onSolicit,
+  production, people, templatesCount, onOpenPeople, onOpenPending, onOpenTemplates, onOpenSettings, onImportDocument, onAdd, onSolicit, formReady,
 }) => {
   const counts = useMemo(() => {
     const result: Record<DeliveryStatus, number> = { delivered: 0, solicited: 0, sent: 0, todo: 0 };
@@ -46,7 +48,7 @@ const Dashboard: React.FC<Props> = ({
     <section className="animate-enter">
       <PageHeader title="Situazione" text={`Lo stato dei documenti per ${production.title}.`} />
 
-      {!production.formLink && (
+      {!formReady && (
         <div className="mb-6 flex flex-col gap-3 border border-manila bg-card p-4 rounded-[3px] sm:flex-row sm:items-center">
           <Link2 className="h-5 w-5 shrink-0" />
           <p className="flex-1 text-sm">Manca il link del modulo Tally: senza, i messaggi WhatsApp non possono partire.</p>

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { ChevronDown, Download, FileSpreadsheet } from 'lucide-react';
+import { ChevronDown, Download, FileSpreadsheet, Paperclip, RefreshCw } from 'lucide-react';
 import type { Person } from '../types';
 import { extractCsvFileUrl } from '../services/tallyCsv';
+import { isSubmissionFile } from '../lib/forms';
 import { Board, Button, EmptyState, IconButton, PageHeader, Strip } from '../components/ui';
 
 // Campi tecnici o duplicati che non servono nella scheda.
@@ -23,23 +24,39 @@ interface Props {
   onImportCsv: () => void;
   importing: boolean;
   onGeneratePdf: (person: Person) => void;
+  /** Apre un file caricato dal modulo DocuSet (link firmato). */
+  onOpenFile: (value: string) => void;
+  /** Presente solo con il modulo DocuSet attivo. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
-const Responses: React.FC<Props> = ({ people, onImportCsv, importing, onGeneratePdf }) => {
+const Responses: React.FC<Props> = ({ people, onImportCsv, importing, onGeneratePdf, onOpenFile, onRefresh, refreshing }) => {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   return (
     <section className="animate-enter">
       <PageHeader
         title="Risposte"
-        text="Chi ha compilato il modulo Tally. Apri una riga per vedere i dati, oppure genera il PDF compilato."
-        actions={<Button variant="secondary" onClick={onImportCsv} disabled={importing} icon={<FileSpreadsheet className="h-4 w-4" />}>
-          {importing ? 'Lettura…' : 'Importa CSV Tally'}
-        </Button>}
+        text={onRefresh
+          ? 'Chi ha compilato il modulo. Le risposte arrivano da sole; apri una riga per vedere dati e allegati.'
+          : 'Chi ha compilato il modulo Tally. Apri una riga per vedere i dati, oppure genera il PDF compilato.'}
+        actions={<>
+          {onRefresh && (
+            <Button variant="secondary" onClick={onRefresh} disabled={refreshing} icon={<RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />}>
+              Aggiorna
+            </Button>
+          )}
+          <Button variant={onRefresh ? 'ghost' : 'secondary'} onClick={onImportCsv} disabled={importing} icon={<FileSpreadsheet className="h-4 w-4" />}>
+            {importing ? 'Lettura…' : 'Importa CSV Tally'}
+          </Button>
+        </>}
       />
 
       {people.length === 0 ? (
-        <EmptyState title="Ancora nessuna risposta" text="Scarica il CSV dalla sezione Submissions di Tally e importalo qui: ogni risposta viene collegata alla persona giusta." />
+        <EmptyState title="Ancora nessuna risposta" text={onRefresh
+          ? 'Manda il modulo da Cast & Crew: quando una persona lo compila, la risposta compare qui da sola.'
+          : 'Scarica il CSV dalla sezione Submissions di Tally e importalo qui: ogni risposta viene collegata alla persona giusta.'} />
       ) : (
         <Board>
           {people.map(p => {
@@ -70,6 +87,18 @@ const Responses: React.FC<Props> = ({ people, onImportCsv, importing, onGenerate
                         {Object.entries(fields).map(([key, value]) => {
                           const text = String(value ?? '');
                           if (!text || HIDDEN_FIELDS.has(key.toLowerCase().trim())) return null;
+                          if (isSubmissionFile(text)) {
+                            return (
+                              <div key={key} className="min-w-0 border-l-2 border-manila/50 pl-3">
+                                <dt className="text-xs text-ink-soft">{key}</dt>
+                                <dd className="mt-0.5 text-sm">
+                                  <button type="button" onClick={() => onOpenFile(text)} className="inline-flex items-center gap-1 underline underline-offset-4">
+                                    <Paperclip className="h-3.5 w-3.5" /> {/firma|signature/i.test(key) ? 'Apri la firma' : 'Apri il file'}
+                                  </button>
+                                </dd>
+                              </div>
+                            );
+                          }
                           const fileUrl = extractCsvFileUrl(text);
                           const isSignature = /firma|signature/i.test(key) || text.includes('storage.tally.so');
                           return (
