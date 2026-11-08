@@ -1,12 +1,3 @@
-
-export enum DocStatus {
-  NOT_SENT = 'NON INVIATO',
-  SENT = 'INVIATO',
-  OPENED = 'APERTO',
-  SIGNED = 'FIRMATO',
-  REVOKED = 'REVOCATO'
-}
-
 export enum TemplateType {
   CONTRACT = 'CONTRATTO',
   RELEASE = 'LIBERATORIA',
@@ -34,6 +25,7 @@ export interface Template {
   id: string;
   name: string;
   type: TemplateType;
+  /** data: URL in modalità locale, `sb:<percorso>` quando il file è nello storage privato Supabase. */
   fileUrl: string;
   fileName: string;
   fileType: string;
@@ -55,8 +47,6 @@ export interface Person {
   hubToken: string;
   fieldsJSON?: string;
   removedAt?: string;
-  intolerances?: string;
-  hasCar?: boolean;
   deliveredAt?: string; // Data di consegna dal form Tally
   sentAt?: string; // Data di invio link WhatsApp
   solicitedAt?: string; // Data di sollecito WhatsApp
@@ -73,85 +63,14 @@ export interface Production {
   whatsappSolicitTemplate?: string;
 }
 
-export interface DocumentInstance {
-  id: string;
-  productionId: string;
-  personId: string;
-  templateId: string;
-  status: DocStatus;
-  sentAt?: string;
-  openedAt?: string;
-  signedAt?: string;
-  finalPdfUrl?: string;
-  auditJSON?: string;
-}
-
-export interface AppNotification {
-  id: string;
-  productionId: string;
-  personId: string;
-  documentInstanceId: string;
-  type: 'DOCUMENT_SIGNED';
-  title: string;
-  message: string;
-  createdAt: string;
-  readAt: string | null;
-}
-
-export interface SubmissionRequest {
-  code: string;
-  productionId: string;
-  label: string;
-  createdAt: string;
-  usedAt?: string;
-}
-
-export interface Submission {
-  id: string;
-  productionId: string;
-  submittedAt: string;
-  name: string;
-  role: string;
-  email: string;
-  phone: string;
-  notes?: string;
-  hasSignature: boolean;
-  signatureData?: string;
-}
-
 export interface AppState {
   productions: Production[];
   people: Person[];
   templates: Template[];
-  instances: DocumentInstance[];
-  notifications: AppNotification[];
-  submissionRequests?: SubmissionRequest[];
-  submissions: Submission[];
 }
 
-export enum DocumentStatus {
-  PENDING = 'IN ATTESA',
-  SENT = 'INVIATO',
-  VIEWED = 'VISUALIZZATO',
-  SIGNED = 'FIRMATO',
-  EXPIRED = 'SCADUTO'
-}
+/** Stato di consegna mostrato nelle strisce: deriva dai timestamp della persona. */
+export type DeliveryStatus = 'delivered' | 'solicited' | 'sent' | 'todo';
 
-export interface DocumentRecord {
-  id: string;
-  recipientName: string;
-  role: string;
-  documentType: string;
-  status: DocumentStatus;
-}
-
-export interface FormState {
-  firstName: string;
-  lastName: string;
-  birthDate: string;
-  taxCode: string;
-  role: string;
-  phone: string;
-  idNumber: string;
-  signature: string;
-}
+export const deliveryStatus = (p: Person): DeliveryStatus =>
+  p.deliveredAt ? 'delivered' : p.solicitedAt ? 'solicited' : p.sentAt ? 'sent' : 'todo';

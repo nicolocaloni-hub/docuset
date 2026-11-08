@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+/* Token presi dal design system SmartSet (repo smartset.it, DESIGN.md). */
+@theme {
+  --color-paper: #F4F1EA;
+  --color-paper-deep: #E9E3D6;
+  --color-ink: #1C1C1C;
+  --color-ink-soft: #4A4740;
+  --color-strip-white: #FFFFFF;
+  --color-strip-yellow: #F7D44C;
+  --color-strip-blue: #3B5BA9;
+  --color-strip-green: #3F7A45;
+  --color-strip-salmon: #F2A99A;
+  --color-strip-beige: #E2DACA;
+  --color-cue: #B62A23;
+
+  --font-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--color-strip-yellow);
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-strip-blue);
+  outline-offset: 2px;
+}
+
+.font-display {
+  text-transform: uppercase;
+  letter-spacing: 0.005em;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-enter {
+  animation: enter 0.22s var(--ease-out-strong) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-enter { animation: none; }
+}

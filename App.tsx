@@ -1,1348 +1,449 @@
-
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  FileCheck, LayoutDashboard, Clapperboard, Users, FileText, Settings, 
-  Plus, Search, MoreVertical, Send, MessageSquare, Download, Trash2, 
-  CheckCircle, Clock, AlertCircle, ChevronRight, Filter, 
-  ChevronDown, X, Check, LogOut, Bell, Menu, Loader, ShieldCheck, 
-  ArrowRight, Archive, Inbox, ChevronUp, BellOff, Eye, Search as SearchIcon,
-  FileIcon, FileUp, Info, Moon, Sun, Copy, ClipboardCheck, Phone, Layout,
-  Share2, ArrowLeft, ExternalLink, Edit2, AlertTriangle, FileSpreadsheet,
-  MousePointer2, History, Shield, FileQuestion, Mail, StickyNote, UserMinus,
-  RefreshCw, CheckCheck, UserPlus, Link, FilePlus, Database, HardDrive, 
-  Activity, Terminal, RotateCcw, QrCode, Upload, FileCode, Zap, Smartphone
-} from 'lucide-react';
-import { 
-  DocStatus, TemplateType, AppState, Production, Person, Template, 
-  DocumentInstance, AppNotification, FieldMapping, FormState, Submission, SubmissionRequest
-} from './types';
-import SignatureCanvasComponent from './components/SignatureCanvas';
-import PublicForm from './components/PublicForm';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import { CheckCircle2, FileText, Inbox, LayoutGrid, Plus, RefreshCw, Settings, Users } from 'lucide-react';
+import { type AppState, type Person, type Template, TemplateType } from './types';
+import { supabase } from './lib/supabase';
+import { type SyncStatus, useAppData } from './lib/useAppData';
+import { deleteTemplateFile, fetchTemplateBytes, storeTemplateFile, templateFileUrl } from './lib/templateFiles';
 import { extractCrewMembersFromFile, normalizePhone } from './services/documentExtraction';
-import { extractCsvFileUrl, keepLatestTallySubmissions, parseTallyCsvFile } from './services/tallyCsv';
-import {
-  fillPdfTemplateAutomatically,
-  getPdfFormDataValue,
-  getPdfSignatureSource,
-} from './services/pdfTemplateFilling';
+import { keepLatestTallySubmissions, parseTallyCsvFile } from './services/tallyCsv';
+import { mergeTallySubmissions } from './services/tallyMerge';
+import { buildMessage, whatsappUrl } from './services/whatsapp';
+import { buildPersonPdf } from './services/personPdf';
+import { Button, ToastProvider, useToast } from './components/ui';
+import { ConfirmModal, GeneratePdfModal, ImportReviewModal, PersonModal, ProductionModal, SettingsModal, type PersonDraft } from './components/modals';
+import Login from './components/Login';
+import Dashboard from './views/Dashboard';
+import PeopleList from './views/PeopleList';
+import Responses from './views/Responses';
+import Templates from './views/Templates';
 
-const STORAGE_KEY = 'setdocs_app_data_v4';
-const THEME_KEY = 'setdocs_theme';
+type Tab = 'DASHBOARD' | 'PEOPLE' | 'REQUESTS' | 'SIGNED' | 'TEMPLATES';
 
-const INITIAL_DATA: AppState = {
-  productions: [
-    { id: 'p1', title: 'Produzione Demo', notes: 'Progetto dimostrativo', createdAt: new Date().toISOString(), producerPhone: '+390000000000' }
-  ],
-  people: [
-    { id: 'per1', productionId: 'p1', name: 'Membro Demo', role: 'DOP', department: 'Camera', whatsapp: '+390000000000', hubToken: crypto.randomUUID() }
-  ],
-  templates: [
-    { 
-      id: 't1', name: 'Liberatoria Cast', type: TemplateType.RELEASE, 
-      isBlank: true, createdAt: '2024-05-01', fileUrl: 'https://pdf-lib.js.org/assets/with_update_sections.pdf', fileName: 'liberatoria.pdf', fileType: 'application/pdf',
-      fields: [
-        { id: 'name', label: 'Nome e Cognome', type: 'text', x: 0, y: 0, xPct: 0.16, yPct: 0.12, page: 0, fontSize: 12 },
-        { id: 'date', label: 'Data', type: 'text', x: 0, y: 0, xPct: 0.16, yPct: 0.15, page: 0, fontSize: 10 },
-        { id: 'sig', label: 'Firma', type: 'signature', x: 0, y: 0, xPct: 0.16, yPct: 0.6, page: 0, wPct: 0.2, hPct: 0.05 }
-      ]
-    }
-  ],
-  instances: [],
-  notifications: [],
-  submissionRequests: [],
-  submissions: []
+const NAV: { id: Tab; label: string; short: string; icon: typeof Users }[] = [
+  { id: 'DASHBOARD', label: 'Situazione', short: 'Situazione', icon: LayoutGrid },
+  { id: 'PEOPLE', label: 'Cast & Crew', short: 'Persone', icon: Users },
+  { id: 'REQUESTS', label: 'In attesa', short: 'In attesa', icon: Inbox },
+  { id: 'SIGNED', label: 'Risposte', short: 'Risposte', icon: CheckCircle2 },
+  { id: 'TEMPLATES', label: 'Template', short: 'Template', icon: FileText },
+];
+
+const ACTIVE_PRODUCTION_KEY = 'docuset_active_production';
+
+const SYNC_LABEL: Record<SyncStatus, string> = {
+  loading: 'Caricamento…', local: 'Salvato in questo browser', saving: 'Salvataggio…',
+  saved: 'Salvato online', error: 'Errore di salvataggio', conflict: 'Modificato altrove',
 };
 
-const App: React.FC = () => {
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    try {
-      const saved = localStorage.getItem(THEME_KEY);
-      return (saved as any) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    } catch (e) { return 'dark'; }
+type Dialog =
+  | { kind: 'person'; person?: Person }
+  | { kind: 'production' }
+  | { kind: 'settings' }
+  | { kind: 'import'; members: Person[] }
+  | { kind: 'pdf'; person: Person }
+  | { kind: 'delete-person'; person: Person }
+  | { kind: 'delete-template'; template: Template }
+  | { kind: 'delete-production' }
+  | null;
+
+const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ userId, email }) => {
+  const toast = useToast();
+  const { data, setData, status, error, reload } = useAppData(userId);
+  const [tab, setTab] = useState<Tab>('DASHBOARD');
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    try { return localStorage.getItem(ACTIVE_PRODUCTION_KEY); } catch { return null; }
   });
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [busy, setBusy] = useState({ document: false, csv: false, template: false, pdf: false });
+  const documentInput = useRef<HTMLInputElement>(null);
+  const csvInput = useRef<HTMLInputElement>(null);
+  const templateInput = useRef<HTMLInputElement>(null);
 
-  const [data, setData] = useState<AppState>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return INITIAL_DATA;
-      const parsed = JSON.parse(saved);
-      return {
-        productions: Array.isArray(parsed?.productions) ? parsed.productions : INITIAL_DATA.productions,
-        people: Array.isArray(parsed?.people) ? parsed.people : INITIAL_DATA.people,
-        templates: Array.isArray(parsed?.templates) ? parsed.templates : INITIAL_DATA.templates,
-        instances: Array.isArray(parsed?.instances) ? parsed.instances : INITIAL_DATA.instances,
-        notifications: Array.isArray(parsed?.notifications) ? parsed.notifications : INITIAL_DATA.notifications,
-        submissions: Array.isArray(parsed?.submissions) ? parsed.submissions : INITIAL_DATA.submissions,
-        submissionRequests: Array.isArray(parsed?.submissionRequests) ? parsed.submissionRequests : [],
-      };
-    } catch (e) { return INITIAL_DATA; }
-  });
-
-  const path = window.location.pathname;
-  const signMatch = path.match(/^\/sign\/([^/]+)$/);
-  const publicToken = signMatch ? signMatch[1] : null;
-
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'PRODUCTIONS' | 'PEOPLE' | 'TEMPLATES' | 'ARCHIVE' | 'PENDING' | 'REQUESTS' | 'SIGNED'>('DASHBOARD');
-  const [selectedProdId, setSelectedProdId] = useState<string | null>(data.productions[0]?.id || null);
-
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [isNewProdModalOpen, setIsNewProdModalOpen] = useState(false);
-  const [isNewMemberModalOpen, setIsNewMemberModalOpen] = useState(false);
-  const [isRecipientModalOpen, setIsRecipientModalOpen] = useState(false);
-  const [editingPerson, setEditingPerson] = useState<Person | null>(null);
-  const [isProdListOpen, setIsProdListOpen] = useState(false);
-  const [isParsingDoc, setIsParsingDoc] = useState(false);
-  const [isImportingTallyCsv, setIsImportingTallyCsv] = useState(false);
-  const [pendingImportMembers, setPendingImportMembers] = useState<Person[] | null>(null);
-  const [editingPendingMember, setEditingPendingMember] = useState<Person | null>(null);
-  const [expandedSignedPersonId, setExpandedSignedPersonId] = useState<string | null>(null);
-
-  const [isTemplateSelectModalOpen, setIsTemplateSelectModalOpen] = useState(false);
-  const [selectedPersonForTemplate, setSelectedPersonForTemplate] = useState<Person | null>(null);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-
-  // Modal State for deletions
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'person' | 'template' | 'production', id: string, name: string } | null>(null);
-
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editingTitleValue, setEditingTitleValue] = useState('');
-
-  const [newProdData, setNewProdData] = useState({ title: '', notes: '', phone: '' });
-  const [newMemberData, setNewMemberData] = useState({ name: '', role: '', whatsapp: '' });
-  const [formLinkInput, setFormLinkInput] = useState('');
-  const [whatsappMessageInput, setWhatsappMessageInput] = useState('');
-  const [whatsappSolicitInput, setWhatsappSolicitInput] = useState('');
-
-  const docxInputRef = useRef<HTMLInputElement>(null);
-  const templateInputRef = useRef<HTMLInputElement>(null);
-  const tallyCsvInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data]);
-  useEffect(() => { 
-    localStorage.setItem(THEME_KEY, theme);
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-  }, [theme]);
+  const production = data?.productions.find(p => p.id === selectedId) ?? data?.productions[0];
+  const productionId = production?.id ?? null;
+  const people = useMemo(() => (data?.people ?? []).filter(p => p.productionId === productionId && !p.removedAt), [data, productionId]);
+  const delivered = useMemo(() => people.filter(p => p.deliveredAt), [people]);
+  const pendingCount = people.length - delivered.length;
 
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsProdListOpen(false);
-        setIsSidebarOpen(false);
-        setIsEditingTitle(false);
-        setDeleteTarget(null);
-      }
-    };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
+    if (!productionId) return;
+    try { localStorage.setItem(ACTIVE_PRODUCTION_KEY, productionId); } catch { /* solo comodità */ }
+  }, [productionId]);
 
-  const activeProduction = useMemo(() => data.productions.find(p => p.id === selectedProdId), [selectedProdId, data.productions]);
-  const prodPeople = useMemo(() => data.people.filter(p => p.productionId === selectedProdId && !p.removedAt), [selectedProdId, data.people]);
-  const pendingPeople = useMemo(() => prodPeople.filter(p => !p.deliveredAt), [prodPeople]);
-  const signedPeople = useMemo(() => prodPeople.filter(p => p.deliveredAt), [prodPeople]);
-  const prodTemplates = useMemo(() => data.templates, [data.templates]);
+  useEffect(() => { if (error) toast(error, 'error'); }, [error, toast]);
 
-  useEffect(() => {
-    if (activeProduction) {
-      setFormLinkInput(activeProduction.formLink || '');
-      setWhatsappMessageInput(activeProduction.whatsappMessageTemplate || "Ciao {{nome}}! Compila questi dati per la produzione '{{titolo_produzione}}':\n\n{{link_form}}\n\nI tuoi dati verranno gestiti nella piena sicurezza.");
-      setWhatsappSolicitInput(activeProduction.whatsappSolicitTemplate || "Ciao {{nome}},\n{{link_form}}\nricordati di firmare i documenti necessari per il set di '{{titolo_produzione}}'.");
-    }
-  }, [activeProduction]);
+  const updatePerson = useCallback((id: string, patch: Partial<Person>) => {
+    setData(prev => ({ ...prev, people: prev.people.map(p => (p.id === id ? { ...p, ...patch } : p)) }));
+  }, [setData]);
 
-  const handleSaveSettings = () => {
-    if (!selectedProdId) return;
-    setData(prev => ({
-      ...prev,
-      productions: prev.productions.map(p => p.id === selectedProdId ? { 
-        ...p, 
-        formLink: formLinkInput,
-        whatsappMessageTemplate: whatsappMessageInput,
-        whatsappSolicitTemplate: whatsappSolicitInput
-      } : p)
-    }));
-    setIsSettingsModalOpen(false);
-  };
+  /* ---------- WhatsApp ---------- */
 
-  const finishEditingTitle = () => {
-    if (editingTitleValue.trim() && selectedProdId) {
-      setData(prev => ({
-        ...prev,
-        productions: prev.productions.map(p => p.id === selectedProdId ? { ...p, title: editingTitleValue.trim() } : p)
-      }));
-    }
-    setIsEditingTitle(false);
-  };
-
-  const handleSendWhatsApp = async (p?: Person) => {
-    const baseUrl = activeProduction?.formLink;
-    if (!baseUrl) {
-      alert("Configura il link Tally nelle impostazioni della produzione.");
-      setIsSettingsModalOpen(true);
+  const sendWhatsApp = (person: Person) => {
+    if (!production?.formLink) {
+      toast('Prima imposta il link del modulo Tally.', 'error');
+      setDialog({ kind: 'settings' });
       return;
     }
-
-    let finalLink = baseUrl;
-    let personName = '';
-    if (p) {
-      const separator = baseUrl.includes('?') ? '&' : '?';
-      finalLink += `${separator}pid=${selectedProdId}&mid=${p.id}`;
-      // Extract first name or use the full name if it's a single word
-      personName = p.name.split(' ')[0];
-    }
-
-    const greeting = personName ? `Ciao ${personName}!` : 'Ciao!';
-    
-    let message = '';
-    if (activeProduction?.whatsappMessageTemplate) {
-      message = activeProduction.whatsappMessageTemplate
-        .replace(/{{nome}}/g, personName || '')
-        .replace(/{{titolo_produzione}}/g, activeProduction.title || '')
-        .replace(/{{link_form}}/g, finalLink);
-    } else {
-      message = `${greeting} Compila questi dati per la produzione "${activeProduction?.title}":
-
-${finalLink}
-
-I tuoi dati verranno gestiti nella piena sicurezza, sotto la norma vigente di privacy.`;
-    }
-
-    const phone = p ? p.whatsapp.replace(/[^\d+]/g, '') : '';
-    
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    let url = '';
-    if (isAndroid) {
-      url = `intent://send?phone=${phone}&text=${encodeURIComponent(message)}#Intent;package=com.whatsapp;scheme=whatsapp;end;`;
-    } else {
-      url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
-    }
-    
-    window.open(url, '_blank');
-    if (p) {
-      setData(prev => ({
-        ...prev,
-        people: prev.people.map(person => 
-          person.id === p.id ? { ...person, sentAt: new Date().toISOString() } : person
-        )
-      }));
-    }
+    const solicit = Boolean(person.sentAt);
+    window.open(whatsappUrl(person.whatsapp, buildMessage(solicit ? 'solicit' : 'invite', production, person), navigator.userAgent), '_blank');
+    updatePerson(person.id, solicit ? { solicitedAt: new Date().toISOString() } : { sentAt: new Date().toISOString() });
   };
 
-  const handleSollecitaWhatsApp = async (p: Person) => {
-    const baseUrl = activeProduction?.formLink;
-    if (!baseUrl) {
-      alert("Configura il link Tally nelle impostazioni della produzione.");
-      setIsSettingsModalOpen(true);
-      return;
-    }
+  /* ---------- Import lista troupe (DOCX/PDF) ---------- */
 
-    let finalLink = baseUrl;
-    const separator = baseUrl.includes('?') ? '&' : '?';
-    finalLink += `${separator}pid=${selectedProdId}&mid=${p.id}`;
-    const personName = p.name.split(' ')[0];
-
-    let message = '';
-    if (activeProduction?.whatsappSolicitTemplate) {
-      message = activeProduction.whatsappSolicitTemplate
-        .replace(/{{nome}}/g, personName || '')
-        .replace(/{{titolo_produzione}}/g, activeProduction.title || '')
-        .replace(/{{link_form}}/g, finalLink);
-    } else {
-      message = `Ciao ${personName},
-${finalLink}
-ricordati di firmare i documenti necessari per il set di '${activeProduction?.title}'.`;
-    }
-
-    const phone = p.whatsapp.replace(/[^\d+]/g, '');
-    
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    let url = '';
-    if (isAndroid) {
-      url = `intent://send?phone=${phone}&text=${encodeURIComponent(message)}#Intent;package=com.whatsapp;scheme=whatsapp;end;`;
-    } else {
-      url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
-    }
-    
-    window.open(url, '_blank');
-    setData(prev => ({
-      ...prev,
-      people: prev.people.map(person => 
-        person.id === p.id ? { ...person, solicitedAt: new Date().toISOString() } : person
-      )
-    }));
-  };
-
-  const generateFilledPdf = async (template: Template, formData: Record<string, unknown>, signatureUrl: string) => {
-    try {
-      // Fetch the blank PDF
-      const existingPdfBytes = await fetch(template.fileUrl).then(res => res.arrayBuffer());
-      const { PDFDocument } = await import('pdf-lib');
-      const pdfDoc = await PDFDocument.load(existingPdfBytes);
-      const pages = pdfDoc.getPages();
-
-      // Embed signature if available
-      let signatureImage: any = null;
-      if (signatureUrl) {
-        try {
-          const sigRes = await fetch(signatureUrl);
-          const sigBytes = await sigRes.arrayBuffer();
-          try {
-            signatureImage = await pdfDoc.embedPng(sigBytes);
-          } catch (e) {
-            signatureImage = await pdfDoc.embedJpg(sigBytes);
-          }
-        } catch (e) {
-          console.error("Failed to load signature image", e);
-        }
-      }
-
-      // Draw fields
-      for (const field of template.fields) {
-        const pageIndex = field.page || 0;
-        if (pageIndex >= pages.length) continue;
-        const page = pages[pageIndex];
-        const { width, height } = page.getSize();
-
-        const x = field.xPct !== undefined ? field.xPct * width : field.x;
-        const y = field.yPct !== undefined ? (1 - field.yPct) * height : height - field.y;
-
-        if (field.type === 'signature' && signatureImage) {
-          const sigWidth = field.wPct !== undefined ? field.wPct * width : (field.width || 150);
-          const sigHeight = field.hPct !== undefined ? field.hPct * height : (field.height || 50);
-          page.drawImage(signatureImage, {
-            x,
-            y: y - sigHeight,
-            width: sigWidth,
-            height: sigHeight,
-          });
-        } else if (field.type === 'text' || field.type === 'date') {
-          const text = getPdfFormDataValue(formData, field.label) || getPdfFormDataValue(formData, field.id);
-
-          if (text) {
-            page.drawText(text, {
-              x,
-              y,
-              size: field.fontSize || 12,
-            });
-          }
-        }
-      }
-
-      return pdfDoc.save();
-    } catch (error) {
-      console.error("PDF Generation Error:", error);
-      throw error;
-    }
-  };
-
-  const handleSaveEditedPerson = () => {
-    if (!editingPerson) return;
-    const formatted = { ...editingPerson, whatsapp: normalizePhone(editingPerson.whatsapp) };
-    setData(prev => ({
-      ...prev,
-      people: prev.people.map(p => p.id === formatted.id ? formatted : p)
-    }));
-    setEditingPerson(null);
-  };
-
-  const handleSaveEditedPendingMember = () => {
-    if (!editingPendingMember || !pendingImportMembers) return;
-    const formatted = { ...editingPendingMember, whatsapp: normalizePhone(editingPendingMember.whatsapp) };
-    setPendingImportMembers(prev => 
-      prev ? prev.map(p => p.id === formatted.id ? formatted : p) : null
-    );
-    setEditingPendingMember(null);
-  };
-
-  const handleConfirmImport = () => {
-    if (!pendingImportMembers) return;
-    setData(prev => ({ ...prev, people: [...prev.people, ...pendingImportMembers] }));
-    setPendingImportMembers(null);
-    alert(`Importazione confermata: ${pendingImportMembers.length} membri aggiunti.`);
-  };
-
-  const handleGeneratePdf = async () => {
-    if (!selectedPersonForTemplate || !selectedTemplateId) return;
-    setIsGeneratingPdf(true);
-    try {
-      const template = data.templates.find(t => t.id === selectedTemplateId);
-      if (!template) throw new Error("Template non trovato");
-
-      const templateResponse = await fetch(template.fileUrl);
-      if (!templateResponse.ok) throw new Error('Non riesco ad aprire il template PDF selezionato.');
-      const pdfBytes = await templateResponse.arrayBuffer();
-
-      // Get person data
-      let formData: Record<string, unknown> | null = null;
-      if (selectedPersonForTemplate.fieldsJSON) {
-        try {
-          formData = JSON.parse(selectedPersonForTemplate.fieldsJSON);
-        } catch (e) {}
-      } else {
-        const personInstances = data.instances.filter(i => i.personId === selectedPersonForTemplate.id && i.status === DocStatus.SIGNED);
-        if (personInstances.length > 0 && personInstances[0].auditJSON) {
-          try {
-            const audit = JSON.parse(personInstances[0].auditJSON);
-            formData = audit.formData;
-          } catch (e) {}
-        }
-      }
-
-      if (!formData) {
-        throw new Error('Per questa persona non sono disponibili dati importati da Tally.');
-      }
-
-      const completeFormData = { nome: selectedPersonForTemplate.name, ...formData };
-      let pdfBytesOut: Uint8Array;
-      if (template.fields.length > 0) {
-        pdfBytesOut = await generateFilledPdf(template, completeFormData, getPdfSignatureSource(completeFormData));
-      } else {
-        const signatureSource = getPdfSignatureSource(completeFormData);
-        let signatureBytes: ArrayBuffer | undefined;
-        if (signatureSource) {
-          try {
-            const signatureResponse = await fetch(signatureSource);
-            if (!signatureResponse.ok) throw new Error(`HTTP ${signatureResponse.status}`);
-            signatureBytes = await signatureResponse.arrayBuffer();
-          } catch (error) {
-            console.error('Errore download firma:', error);
-            throw new Error('Non riesco a scaricare la firma indicata nel CSV. Verifica che il collegamento Tally sia ancora valido.');
-          }
-        }
-
-        const result = await fillPdfTemplateAutomatically(pdfBytes, completeFormData, signatureBytes);
-        pdfBytesOut = result.pdfBytes;
-      }
-      const blob = new Blob([pdfBytesOut as any], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${selectedPersonForTemplate.name}_${template.name}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      setIsTemplateSelectModalOpen(false);
-      setSelectedPersonForTemplate(null);
-      setSelectedTemplateId('');
-    } catch (error) {
-      console.error("Errore generazione PDF:", error);
-      alert(error instanceof Error ? error.message : 'Errore durante la generazione del PDF.');
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  };
-
-  const handleTallyCsvSelection = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const importDocument = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedProdId) return;
+    e.target.value = '';
+    if (!file || !productionId || !data) return;
+    setBusy(b => ({ ...b, document: true }));
+    try {
+      const parsed = await extractCrewMembersFromFile(file);
+      const known = new Set(people.map(p => p.name.toLowerCase()));
+      const members: Person[] = parsed
+        .filter(p => p.name && !known.has(p.name.toLowerCase()))
+        .map(p => ({
+          id: `per-${crypto.randomUUID()}`, productionId, name: p.name, role: p.role || 'Crew',
+          department: p.department || 'Generale', whatsapp: normalizePhone(p.phone || ''), hubToken: crypto.randomUUID(),
+        }));
+      const duplicates = parsed.filter(p => p.name).length - members.length;
+      if (members.length) {
+        setDialog({ kind: 'import', members });
+        if (duplicates) toast(`${duplicates} persone erano già presenti e sono state saltate.`);
+      } else {
+        toast(duplicates
+          ? `Tutte le ${duplicates} persone del file sono già presenti.`
+          : 'Nessuna persona trovata: il file deve contenere una tabella con nome, ruolo e telefono.', 'error');
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Errore nella lettura del file.', 'error');
+    } finally {
+      setBusy(b => ({ ...b, document: false }));
+    }
+  };
 
-    setIsImportingTallyCsv(true);
+  /* ---------- Import risposte Tally (CSV) ---------- */
+
+  const importCsv = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !productionId || !data) return;
+    setBusy(b => ({ ...b, csv: true }));
     try {
       const parsed = await parseTallyCsvFile(file);
-      const submissionsForProduction = parsed.submissions.filter(submission =>
-        !submission.productionId || submission.productionId === selectedProdId
-      );
-      const excludedProductions = parsed.submissions.length - submissionsForProduction.length;
-
-      if (submissionsForProduction.length === 0) {
-        throw new Error('Il CSV contiene risposte riferite a un’altra produzione. Seleziona il progetto corretto e riprova.');
-      }
-
-      const submissions = keepLatestTallySubmissions(submissionsForProduction);
-      const duplicateResponses = submissionsForProduction.length - submissions.length;
-      const updatedPeople = data.people.map(person => ({ ...person }));
-      const updatedNotifications = [...data.notifications];
-      const normalizeName = (name: string) => name.toLowerCase().trim().replace(/\s+/g, ' ');
-      let createdPeople = 0;
-      let updatedExistingPeople = 0;
-
-      submissions.forEach(submission => {
-        let personIndex = submission.personId
-          ? updatedPeople.findIndex(person =>
-              person.id === submission.personId && person.productionId === selectedProdId && !person.removedAt
-            )
-          : -1;
-
-        if (personIndex < 0) {
-          personIndex = updatedPeople.findIndex(person =>
-            person.productionId === selectedProdId &&
-            !person.removedAt &&
-            normalizeName(person.name) === normalizeName(submission.name)
-          );
-        }
-
-        if (personIndex < 0) {
-          const canReuseImportedId = Boolean(submission.personId) &&
-            !updatedPeople.some(person => person.id === submission.personId);
-          const newPerson: Person = {
-            id: canReuseImportedId ? submission.personId : `per-${crypto.randomUUID()}`,
-            productionId: selectedProdId,
-            name: submission.name,
-            role: submission.role || 'Membro Troupe',
-            department: 'Generico',
-            whatsapp: normalizePhone(submission.phone),
-            deliveredAt: submission.submittedAt,
-            fieldsJSON: JSON.stringify(submission.formData),
-            hubToken: crypto.randomUUID()
-          };
-          updatedPeople.push(newPerson);
-          personIndex = updatedPeople.length - 1;
-          createdPeople += 1;
-        } else {
-          const existing = updatedPeople[personIndex];
-          updatedPeople[personIndex] = {
-            ...existing,
-            role: existing.role || submission.role || 'Membro Troupe',
-            whatsapp: existing.whatsapp || normalizePhone(submission.phone),
-            deliveredAt: submission.submittedAt,
-            fieldsJSON: JSON.stringify(submission.formData)
-          };
-          updatedExistingPeople += 1;
-        }
-
-        const person = updatedPeople[personIndex];
-        if (!updatedNotifications.some(notification =>
-          notification.personId === person.id && notification.type === 'DOCUMENT_SIGNED'
-        )) {
-          updatedNotifications.push({
-            id: crypto.randomUUID(),
-            productionId: selectedProdId,
-            personId: person.id,
-            documentInstanceId: '',
-            type: 'DOCUMENT_SIGNED',
-            title: 'Nuovo form compilato',
-            message: `${person.name} ha compilato il form su Tally`,
-            createdAt: new Date().toISOString(),
-            readAt: null
-          });
-        }
-      });
-
-      setData(prev => ({
-        ...prev,
-        people: updatedPeople,
-        notifications: updatedNotifications
-      }));
-
-      const ignored = parsed.skippedRows + excludedProductions + duplicateResponses;
-      alert(
-        `Importazione CSV completata: ${submissions.length} risposte elaborate, ` +
-        `${createdPeople} nuovi membri e ${updatedExistingPeople} membri aggiornati.` +
-        (ignored > 0 ? ` ${ignored} righe duplicate, vuote o di altri progetti sono state ignorate.` : '')
-      );
-      setActiveTab('SIGNED');
-    } catch (err: any) {
-      alert(err.message || 'Errore durante la lettura del CSV di Tally.');
+      const forProduction = parsed.submissions.filter(s => !s.productionId || s.productionId === productionId);
+      if (!forProduction.length) throw new Error('Il CSV contiene risposte di un’altra produzione. Seleziona il progetto corretto e riprova.');
+      const latest = keepLatestTallySubmissions(forProduction);
+      const merged = mergeTallySubmissions(data.people, latest, productionId);
+      setData(prev => ({ ...prev, people: merged.people }));
+      const ignored = parsed.skippedRows + (parsed.submissions.length - forProduction.length) + (forProduction.length - latest.length);
+      toast(`${latest.length} risposte importate: ${merged.created} persone nuove, ${merged.updated} aggiornate.` +
+        (ignored ? ` ${ignored} righe vuote, duplicate o di altri progetti ignorate.` : ''));
+      setTab('SIGNED');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Errore nella lettura del CSV di Tally.', 'error');
     } finally {
-      setIsImportingTallyCsv(false);
-      if (tallyCsvInputRef.current) tallyCsvInputRef.current.value = '';
+      setBusy(b => ({ ...b, csv: false }));
     }
   };
 
-  // Replaced window.confirm with internal state trigger
-  const handleDeleteProduction = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const prod = data.productions.find(p => p.id === id);
-    if (!prod) return;
-    setDeleteTarget({ type: 'production', id, name: prod.title });
-  };
+  /* ---------- Template ---------- */
 
-  const executeDelete = () => {
-    if (!deleteTarget) return;
-
-    if (deleteTarget.type === 'person') {
-      setData(prev => ({
-        ...prev,
-        people: prev.people.filter(p => p.id !== deleteTarget.id)
-      }));
-    } else if (deleteTarget.type === 'template') {
-      setData(prev => ({
-        ...prev,
-        templates: prev.templates.filter(t => t.id !== deleteTarget.id)
-      }));
-    } else if (deleteTarget.type === 'production') {
-      const remainingProds = data.productions.filter(p => p.id !== deleteTarget.id);
-      setData(prev => ({
-        ...prev,
-        productions: remainingProds,
-        people: prev.people.filter(p => p.productionId !== deleteTarget.id),
-        notifications: prev.notifications.filter(n => n.productionId !== deleteTarget.id),
-      }));
-      if (selectedProdId === deleteTarget.id) {
-        setSelectedProdId(remainingProds[0]?.id || null);
-      }
-    }
-
-    setDeleteTarget(null);
-  };
-
-  const handleDocxSelection = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const uploadTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedProdId) return;
-
-    setIsParsingDoc(true);
-    try {
-      const parsedMembers = await extractCrewMembersFromFile(file);
-
-      // Process parsed members (both PDF and DOCX)
-      const members: Person[] = [];
-      let duplicatesCount = 0;
-      
-      for (const p of parsedMembers) {
-        if (!p.name) continue;
-        const formattedPhone = normalizePhone(p.phone || '');
-        const isDuplicate = data.people.some(existing => existing.productionId === selectedProdId && !existing.removedAt && existing.name.toLowerCase() === p.name.toLowerCase());
-        
-        if (isDuplicate) { 
-          duplicatesCount++; 
-          continue; 
-        }
-        
-        members.push({
-          id: `per-${crypto.randomUUID()}`,
-          productionId: selectedProdId,
-          name: p.name,
-          role: p.role || 'Crew',
-          department: p.department || 'Generale',
-          whatsapp: formattedPhone,
-          hubToken: crypto.randomUUID()
-        });
-      }
-
-      if (members.length > 0) {
-        setPendingImportMembers(members);
-        if (duplicatesCount > 0) {
-          alert(`Trovati ${members.length} nuovi membri. ${duplicatesCount} duplicati ignorati.`);
-        }
-      } else {
-        alert(`Nessun nuovo membro trovato. Verifica che il file contenga una tabella con nome, ruolo e numero.${duplicatesCount > 0 ? ` (${duplicatesCount} duplicati ignorati)` : ''}`);
-      }
-
-    } catch (err: any) { 
-      alert(err.message || "Errore lettura file."); 
-    } finally {
-      setIsParsingDoc(false);
-      if (docxInputRef.current) docxInputRef.current.value = '';
-    }
-  };
-
-  const handleCreateProduction = () => {
-    if (!newProdData.title.trim()) return;
-    const newProd: Production = { id: 'p-' + Date.now(), title: newProdData.title, createdAt: new Date().toISOString() };
-    setData(prev => ({ ...prev, productions: [...prev.productions, newProd] }));
-    setSelectedProdId(newProd.id);
-    setIsNewProdModalOpen(false);
-    setNewProdData({ title: '', notes: '', phone: '' });
-  };
-
-  const handleAddMember = () => {
-    if (!newMemberData.name.trim() || !selectedProdId) return;
-    const newMember: Person = {
-      id: 'per-' + Date.now(),
-      productionId: selectedProdId,
-      name: newMemberData.name,
-      role: newMemberData.role || 'Crew',
-      department: 'Generale',
-      whatsapp: normalizePhone(newMemberData.whatsapp),
-      hubToken: crypto.randomUUID()
-    };
-    setData(prev => ({ ...prev, people: [...prev.people, newMember] }));
-    setIsNewMemberModalOpen(false);
-    setNewMemberData({ name: '', role: '', whatsapp: '' });
-  };
-
-  const handleDeletePerson = (id: string, e: React.UIEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const p = data.people.find(person => person.id === id);
-    if (p) setDeleteTarget({ type: 'person', id, name: p.name });
-  };
-
-  const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const newTemplate: Template = {
-        id: 't-' + Date.now(),
-        name: file.name.replace('.pdf', ''),
-        type: TemplateType.OTHER,
-        fileUrl: reader.result as string,
-        fileName: file.name,
-        fileType: file.type,
-        isBlank: true,
-        fields: [],
-        createdAt: new Date().toISOString()
+    if (file.type !== 'application/pdf') { toast('Il template deve essere un PDF.', 'error'); return; }
+    if (file.size > 10 * 1024 * 1024) { toast('Il PDF supera i 10 MB.', 'error'); return; }
+    setBusy(b => ({ ...b, template: true }));
+    try {
+      const id = `t-${crypto.randomUUID()}`;
+      const fileUrl = await storeTemplateFile(file, id, userId);
+      const template: Template = {
+        id, name: file.name.replace(/\.pdf$/i, ''), type: TemplateType.OTHER, fileUrl, fileName: file.name,
+        fileType: file.type, isBlank: true, fields: [], createdAt: new Date().toISOString(),
       };
-      setData(prev => ({ ...prev, templates: [...prev.templates, newTemplate] }));
-    };
-    reader.readAsDataURL(file);
-    if (templateInputRef.current) templateInputRef.current.value = '';
+      setData(prev => ({ ...prev, templates: [...prev.templates, template] }));
+      toast(`Template “${template.name}” caricato.`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Caricamento non riuscito.', 'error');
+    } finally {
+      setBusy(b => ({ ...b, template: false }));
+    }
   };
 
-  const handleDeleteTemplate = (id: string, e: React.UIEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const t = data.templates.find(template => template.id === id);
-    if (t) setDeleteTarget({ type: 'template', id, name: t.name });
+  const openTemplate = async (template: Template) => {
+    // Apro la finestra subito: dopo un await i browser bloccano il popup.
+    const win = window.open('', '_blank');
+    try {
+      const url = await templateFileUrl(template.fileUrl);
+      if (url.startsWith('data:')) {
+        const blobUrl = URL.createObjectURL(await (await fetch(url)).blob());
+        if (win) win.location.href = blobUrl; else window.open(blobUrl, '_blank');
+      } else if (win) win.location.href = url; else window.open(url, '_blank');
+    } catch (err) {
+      win?.close();
+      toast(err instanceof Error ? err.message : 'Non riesco ad aprire il template.', 'error');
+    }
   };
 
-  if (publicToken) return <PublicForm hubToken={publicToken} onComplete={() => window.location.href = '/'} />;
+  const generatePdf = async (person: Person, templateId: string) => {
+    const template = data?.templates.find(t => t.id === templateId);
+    if (!template) return;
+    setBusy(b => ({ ...b, pdf: true }));
+    try {
+      let formData: Record<string, unknown> | null = null;
+      try { formData = person.fieldsJSON ? JSON.parse(person.fieldsJSON) : null; } catch { /* dati corrotti */ }
+      if (!formData) throw new Error('Per questa persona non ci sono dati importati da Tally.');
+      const bytes = await buildPersonPdf(template, await fetchTemplateBytes(template.fileUrl), { nome: person.name, ...formData });
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${person.name}_${template.name}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setDialog(null);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Errore nella generazione del PDF.', 'error');
+    } finally {
+      setBusy(b => ({ ...b, pdf: false }));
+    }
+  };
+
+  /* ---------- CRUD ---------- */
+
+  const savePerson = (draft: PersonDraft, existing?: Person) => {
+    const clean = { ...draft, whatsapp: normalizePhone(draft.whatsapp), role: draft.role || 'Crew', department: draft.department || 'Generale' };
+    if (existing) updatePerson(existing.id, clean);
+    else if (productionId) setData(prev => ({ ...prev, people: [...prev.people, { ...clean, id: `per-${crypto.randomUUID()}`, productionId, hubToken: crypto.randomUUID() }] }));
+    setDialog(null);
+  };
+
+  const createProduction = (title: string) => {
+    const id = `p-${crypto.randomUUID()}`;
+    setData(prev => ({ ...prev, productions: [...prev.productions, { id, title, createdAt: new Date().toISOString() }] }));
+    setSelectedId(id);
+    setTab('DASHBOARD');
+    setDialog(null);
+  };
+
+  const deleteProduction = () => {
+    if (!productionId) return;
+    setData(prev => {
+      const productions = prev.productions.filter(p => p.id !== productionId);
+      return {
+        ...prev,
+        productions: productions.length ? productions : [{ id: `p-${crypto.randomUUID()}`, title: 'Nuova produzione', createdAt: new Date().toISOString() }],
+        people: prev.people.filter(p => p.productionId !== productionId),
+      };
+    });
+    setSelectedId(null);
+    setDialog(null);
+  };
+
+  const deleteTemplate = async (template: Template) => {
+    setData(prev => ({ ...prev, templates: prev.templates.filter(t => t.id !== template.id) }));
+    setDialog(null);
+    await deleteTemplateFile(template.fileUrl).catch(() => toast('Il file del template resta nello storage: eliminalo da Supabase.', 'error'));
+  };
+
+  const restoreBackup = (state: AppState) => {
+    setData(state);
+    setSelectedId(state.productions[0]?.id ?? null);
+    setDialog(null);
+    toast('Backup ripristinato.');
+  };
+
+  if (!data || !production) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center gap-3 text-ink-soft">
+        {status === 'error'
+          ? <><span>{error}</span><Button variant="secondary" onClick={reload}>Riprova</Button></>
+          : <><RefreshCw className="h-4 w-4 animate-spin" /> Caricamento…</>}
+      </div>
+    );
+  }
+
+  const productionSwitcher = (className: string) => (
+    <select
+      aria-label="Produzione attiva"
+      value={production.id}
+      onChange={e => { if (e.target.value === '__new') setDialog({ kind: 'production' }); else setSelectedId(e.target.value); }}
+      className={className}
+    >
+      {data.productions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+      <option value="__new">+ Nuova produzione</option>
+    </select>
+  );
+
+  const syncDot = status === 'error' || status === 'conflict' ? 'bg-cue' : status === 'saving' ? 'bg-strip-yellow' : 'bg-strip-green';
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex overflow-hidden transition-all duration-300 font-sans">
-      <input
-        type="file"
-        ref={tallyCsvInputRef}
-        accept=".csv,text/csv"
-        onChange={handleTallyCsvSelection}
-        className="hidden"
-      />
-      
-      {isSidebarOpen && <div className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
-      
-      <aside className={`fixed top-0 left-0 z-50 w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-white/5 h-screen transition-transform lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 flex flex-col h-full pt-10">
-          <div className="flex items-center gap-3 mb-8 px-2">
-            <span className="font-black text-2xl tracking-tight"><span className="text-blue-600">DOCU</span><span className="text-slate-900 dark:text-white">SMARTSET</span></span>
-          </div>
+    <div className="min-h-dvh lg:pl-64">
+      <input ref={documentInput} type="file" accept=".docx,.pdf" hidden onChange={importDocument} />
+      <input ref={csvInput} type="file" accept=".csv,text/csv" hidden onChange={importCsv} />
+      <input ref={templateInput} type="file" accept="application/pdf,.pdf" hidden onChange={uploadTemplate} />
 
-          <div className="mb-8 px-2 relative">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2 px-1">Progetto Attivo</label>
-            <button onClick={() => setIsProdListOpen(!isProdListOpen)} className="w-full flex items-center justify-between px-4 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg hover:bg-indigo-700 transition-all">
-              <span className="truncate pr-2">{activeProduction?.title || 'Seleziona...'}</span>
-              <ChevronDown className="w-4 h-4" />
+      {/* Sidebar desktop */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-ink text-paper lg:flex">
+        <div className="px-5 pb-4 pt-6">
+          <p className="font-mono text-[11px] uppercase tracking-widest text-paper/50">SmartSet</p>
+          <p className="font-display text-4xl font-extrabold leading-none">DocuSet</p>
+        </div>
+        <div className="px-3">
+          {productionSwitcher('w-full min-h-11 cursor-pointer border border-paper/20 bg-ink px-3 text-sm text-paper outline-none hover:border-paper/50')}
+        </div>
+        <nav className="mt-6 flex flex-col gap-px px-3" aria-label="Sezioni">
+          {NAV.map(item => (
+            <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}
+              className={`flex min-h-11 items-center gap-3 px-3 text-left text-sm transition-colors ${tab === item.id ? 'bg-strip-yellow text-ink' : 'text-paper/75 hover:bg-paper/10 hover:text-paper'}`}>
+              <item.icon className="h-4 w-4" />
+              <span className="flex-1">{item.label}</span>
+              {item.id === 'REQUESTS' && pendingCount > 0 && <span className="tabular font-mono text-xs">{pendingCount}</span>}
             </button>
-            
-            {isProdListOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setIsProdListOpen(false)} />
-                <div className="mt-2 relative z-20 bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
-                  {data.productions.map(p => (
-                    <div key={p.id} className="group relative">
-                      <button 
-                        onClick={() => { setSelectedProdId(p.id); setIsProdListOpen(false); }} 
-                        className={`w-full px-4 py-3 text-sm text-left hover:bg-slate-50 dark:hover:bg-white/5 border-b last:border-none border-slate-50 dark:border-white/5 pr-10 ${selectedProdId === p.id ? 'text-indigo-600 font-bold' : 'text-slate-700 dark:text-slate-200'}`}
-                      >
-                        {p.title}
-                      </button>
-                      <button 
-                        type="button" 
-                        onClick={(e) => handleDeleteProduction(p.id, e)} 
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                      >
-                        <Trash2 className="w-4 h-4 pointer-events-none" />
-                      </button>
-                    </div>
-                  ))}
-                  <button onClick={() => { setIsNewProdModalOpen(true); setIsProdListOpen(false); }} className="w-full px-4 py-3 text-[10px] font-black text-indigo-600 uppercase tracking-widest text-left hover:bg-indigo-50 dark:hover:bg-white/10 transition-colors">+ Nuova Produzione</button>
-                </div>
-              </>
-            )}
-          </div>
-          
-          <nav className="flex-1 space-y-1">
-            {[
-              { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
-              { id: 'PEOPLE', label: 'Cast & Crew', icon: Users },
-              { id: 'REQUESTS', label: 'In Attesa', icon: Inbox },
-              { id: 'SIGNED', label: 'Risposte', icon: CheckCircle },
-              { id: 'TEMPLATES', label: 'Template', icon: FileText },
-            ].map(item => (
-              <button key={item.id} onClick={() => { setActiveTab(item.id as any); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${activeTab === item.id ? 'bg-indigo-600/10 text-indigo-600' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5'}`}>
-                <item.icon className="w-5 h-5" /> {item.label}
-              </button>
-            ))}
-          </nav>
-
-          <div className="mt-auto pt-6 border-t dark:border-white/5 space-y-2">
-            <button onClick={() => setIsSettingsModalOpen(true)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5 transition-all">
-              <Settings className="w-5 h-5" /> Impostazioni Form
-            </button>
-            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5 transition-all">
-              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />} {theme === 'dark' ? 'Tema Chiaro' : 'Tema Scuro'}
-            </button>
-          </div>
+          ))}
+        </nav>
+        <div className="mt-auto border-t border-paper/10 p-3">
+          <button type="button" onClick={() => setDialog({ kind: 'settings' })}
+            className="flex min-h-11 w-full items-center gap-3 px-3 text-sm text-paper/75 hover:bg-paper/10 hover:text-paper">
+            <Settings className="h-4 w-4" /> Impostazioni
+          </button>
+          <p className="flex items-center gap-2 px-3 pt-2 text-xs text-paper/50" role="status">
+            <span aria-hidden className={`h-2 w-2 ${syncDot}`} /> {SYNC_LABEL[status]}
+          </p>
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col h-screen overflow-y-auto custom-scrollbar lg:pl-[280px]">
-        <header className="h-20 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl border-b border-slate-200 dark:border-white/5 px-8 flex items-center justify-between sticky top-0 z-30 transition-all">
-          <div className="flex items-center gap-4 flex-1">
-            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="lg:hidden p-2"><Menu className="w-6 h-6" /></button>
-            {isEditingTitle ? (
-              <input
-                autoFocus
-                type="text"
-                value={editingTitleValue}
-                onChange={(e) => setEditingTitleValue(e.target.value)}
-                onBlur={finishEditingTitle}
-                onKeyDown={(e) => e.key === 'Enter' && finishEditingTitle()}
-                className="bg-transparent border-b-2 border-indigo-600 outline-none font-black text-lg py-1 px-2 w-full max-w-md"
-              />
-            ) : (
-              <h1 
-                onClick={() => { setIsEditingTitle(true); setEditingTitleValue(activeProduction?.title || ''); }}
-                className="font-black text-lg truncate text-slate-900 dark:text-white cursor-pointer hover:text-indigo-600 transition-colors"
-                title="Clicca per rinominare"
-              >
-                {activeProduction?.title || 'Seleziona Progetto'}
-              </h1>
+      {/* Barra superiore telefono */}
+      <header className="sticky top-0 z-30 flex items-center gap-2 bg-ink px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] text-paper lg:hidden">
+        <p className="font-display text-2xl font-extrabold leading-none">DocuSet</p>
+        <span aria-hidden className={`h-2 w-2 ${syncDot}`} title={SYNC_LABEL[status]} />
+        <div className="ml-auto min-w-0 max-w-[55%]">
+          {productionSwitcher('w-full min-h-10 truncate border border-paper/20 bg-ink px-2 text-sm text-paper outline-none')}
+        </div>
+        <button type="button" aria-label="Impostazioni" onClick={() => setDialog({ kind: 'settings' })} className="inline-flex h-10 w-10 items-center justify-center text-paper/80">
+          <Settings className="h-5 w-5" />
+        </button>
+      </header>
+
+      {status === 'conflict' && (
+        <div className="flex flex-wrap items-center gap-3 bg-cue px-4 py-3 text-sm text-strip-white lg:px-10">
+          <span className="flex-1">I dati sono stati modificati da un altro dispositivo. Ricarica per vedere la versione aggiornata: le ultime modifiche fatte qui andranno perse.</span>
+          <Button variant="secondary" onClick={reload}>Ricarica</Button>
+        </div>
+      )}
+
+      <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-6 sm:px-6 lg:px-10 lg:pb-16 lg:pt-10">
+        {tab === 'DASHBOARD' && (
+          <Dashboard production={production} people={people} templatesCount={data.templates.length}
+            onOpenPeople={() => setTab('PEOPLE')} onOpenPending={() => setTab('REQUESTS')} onOpenTemplates={() => setTab('TEMPLATES')}
+            onOpenSettings={() => setDialog({ kind: 'settings' })} onImportDocument={() => documentInput.current?.click()}
+            onAdd={() => setDialog({ kind: 'person' })} onSolicit={sendWhatsApp} />
+        )}
+        {(tab === 'PEOPLE' || tab === 'REQUESTS') && (
+          <PeopleList key={tab} mode={tab === 'PEOPLE' ? 'all' : 'pending'} people={people}
+            onEdit={person => setDialog({ kind: 'person', person })} onAdd={() => setDialog({ kind: 'person' })}
+            onDelete={person => setDialog({ kind: 'delete-person', person })} onWhatsApp={sendWhatsApp}
+            onImportDocument={() => documentInput.current?.click()} onImportCsv={() => csvInput.current?.click()}
+            busy={{ document: busy.document, csv: busy.csv }} />
+        )}
+        {tab === 'SIGNED' && (
+          <Responses people={delivered} importing={busy.csv} onImportCsv={() => csvInput.current?.click()}
+            onGeneratePdf={person => setDialog({ kind: 'pdf', person })} />
+        )}
+        {tab === 'TEMPLATES' && (
+          <Templates templates={data.templates} uploading={busy.template} onUpload={() => templateInput.current?.click()}
+            onOpen={openTemplate} onDelete={template => setDialog({ kind: 'delete-template', template })} />
+        )}
+      </main>
+
+      {/* Navigazione telefono */}
+      <nav aria-label="Sezioni" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-ink/10 bg-paper pb-[env(safe-area-inset-bottom)] lg:hidden">
+        {NAV.map(item => (
+          <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}
+            className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] ${tab === item.id ? 'text-ink' : 'text-ink-soft'}`}>
+            {tab === item.id && <span aria-hidden className="absolute inset-x-3 top-0 h-1 bg-strip-yellow" />}
+            <item.icon className="h-5 w-5" />
+            {item.short}
+            {item.id === 'REQUESTS' && pendingCount > 0 && (
+              <span className="tabular absolute right-[18%] top-1.5 min-w-4 bg-strip-salmon px-1 font-mono text-[10px] leading-4 text-ink">{pendingCount}</span>
             )}
-          </div>
-        </header>
+          </button>
+        ))}
+      </nav>
 
-        <main className="p-8 sm:p-12 max-w-7xl mx-auto w-full">
-          
-          {activeTab === 'DASHBOARD' && (
-            <div className="space-y-8 animate-fade-in text-center sm:text-left">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div onClick={() => setActiveTab('PEOPLE')} className="bg-white p-8 dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-white/5 hover:shadow-2xl transition-all cursor-pointer group">
-                  <div className="w-14 h-14 bg-indigo-600/10 text-indigo-600 rounded-2xl flex items-center justify-center mb-6"><Users className="w-7 h-7" /></div>
-                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Cast & Crew</p>
-                  <p className="text-4xl font-black mt-1 text-slate-900 dark:text-white">{prodPeople.length}</p>
-                </div>
-                <div onClick={() => setActiveTab('REQUESTS')} className="bg-white p-8 dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-white/5 hover:shadow-2xl transition-all cursor-pointer group relative">
-                  <div className="w-14 h-14 bg-amber-600/10 text-amber-600 rounded-2xl flex items-center justify-center mb-6"><Inbox className="w-7 h-7" /></div>
-                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">In Attesa</p>
-                  <p className="text-4xl font-black mt-1 text-slate-900 dark:text-white">{pendingPeople.length}</p>
-                  {pendingPeople.length > 0 && <span className="absolute top-8 right-8 w-3 h-3 bg-amber-500 rounded-full animate-pulse"></span>}
-                </div>
-                <div onClick={() => setActiveTab('SIGNED')} className="bg-white p-8 dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-white/5 hover:shadow-2xl transition-all cursor-pointer group">
-                  <div className="w-14 h-14 bg-emerald-600/10 text-emerald-600 rounded-2xl flex items-center justify-center mb-6"><CheckCircle className="w-7 h-7" /></div>
-                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Risposte</p>
-                  <p className="text-4xl font-black mt-1 text-slate-900 dark:text-white">{signedPeople.length}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'PEOPLE' && (
-            <div className="space-y-8 animate-fade-in">
-              <div className="flex justify-between items-center flex-wrap gap-4">
-                <div>
-                  <h2 className="text-3xl font-black text-slate-900 dark:text-white">Cast & Crew</h2>
-                  <p className="text-slate-500 text-sm font-medium">Gestisci la troupe del film e raccogli i dati.</p>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <button onClick={() => tallyCsvInputRef.current?.click()} disabled={isImportingTallyCsv} className="px-6 py-4 bg-amber-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-700 shadow-xl shadow-amber-600/20 flex items-center gap-2 transition-all disabled:opacity-50" title="Importa il CSV scaricato dalla sezione Submissions di Tally">
-                    {isImportingTallyCsv ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} IMPORTA CSV
-                  </button>
-                  <button onClick={() => setIsRecipientModalOpen(true)} className="px-6 py-4 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-600/20 flex items-center gap-2 transition-all">
-                    <Send className="w-4 h-4" /> INVIA MODULO
-                  </button>
-                  <button onClick={() => docxInputRef.current?.click()} disabled={isParsingDoc} className="px-6 py-4 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 dark:hover:bg-white/10 flex items-center gap-2 transition-all disabled:opacity-50">
-                    {isParsingDoc ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileCode className="w-4 h-4" />} IMPORTA DOCX/PDF
-                  </button>
-                  <button onClick={() => setIsNewMemberModalOpen(true)} className="px-6 py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 flex items-center gap-2 transition-all">
-                    <UserPlus className="w-4 h-4" /> Nuovo Membro
-                  </button>
-                  <input type="file" ref={docxInputRef} accept=".docx,.pdf" onChange={handleDocxSelection} className="hidden" />
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {prodPeople.map(p => (
-                  <div key={p.id} onClick={() => setEditingPerson(p)} className="cursor-pointer bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm flex items-center justify-between gap-4 hover:border-indigo-500/30 transition-all">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-1">
-                        <h4 className="font-black text-sm truncate text-slate-900 dark:text-white">{p.name}</h4>
-                        <span className="px-2 py-0.5 bg-slate-100 dark:bg-white/5 rounded text-[9px] font-black uppercase text-slate-500">{p.role}</span>
-                      </div>
-                      <div className="flex items-center gap-4 flex-wrap">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase">{p.whatsapp}</p>
-                        {p.deliveredAt ? (
-                          <span className="flex items-center gap-1 text-[9px] text-emerald-500 font-black uppercase"><CheckCircle className="w-3 h-3" /> Consegnato</span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-[9px] text-amber-500 font-black uppercase"><Clock className="w-3 h-3" /> In Attesa</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {!p.deliveredAt && (
-                        <button type="button" onClick={(e) => { e.stopPropagation(); handleSendWhatsApp(p); }} className="p-2.5 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-xl transition-colors">
-                          {p.solicitedAt ? <CheckCheck className="w-5 h-5 pointer-events-none" /> : p.sentAt ? <Check className="w-5 h-5 pointer-events-none" /> : <Send className="w-5 h-5 pointer-events-none" />}
-                        </button>
-                      )}
-                      <button type="button" onClick={(e) => { e.stopPropagation(); handleDeletePerson(p.id, e); }} className="relative z-10 p-2.5 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-colors">
-                        <Trash2 className="w-5 h-5 pointer-events-none" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {prodPeople.length === 0 && (
-                  <div className="bg-white dark:bg-slate-900 py-16 rounded-[2.5rem] border border-dashed border-slate-200 dark:border-white/5 text-center">
-                    <Users className="w-12 h-12 text-slate-200 dark:text-white/10 mx-auto mb-4" />
-                    <p className="text-slate-400 font-medium italic">Nessun membro trovato. Aggiungine uno nuovo.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'REQUESTS' && (
-            <div className="space-y-8 animate-fade-in">
-              <div className="flex justify-between items-center flex-wrap gap-4">
-                <div>
-                  <h2 className="text-3xl font-black text-slate-900 dark:text-white">In Attesa</h2>
-                  <p className="text-slate-500 text-sm font-medium">Membri che non hanno ancora completato il form Tally.</p>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {pendingPeople.map(p => (
-                  <div key={p.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-row items-center justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-black text-sm truncate text-slate-900 dark:text-white">{p.name}</h4>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{p.role}</p>
-                    </div>
-                    <div className="flex items-center shrink-0">
-                      <button type="button" onClick={() => handleSollecitaWhatsApp(p)} className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2">
-                        {p.solicitedAt ? <CheckCheck className="w-3.5 h-3.5 pointer-events-none" /> : p.sentAt ? <Check className="w-3.5 h-3.5 pointer-events-none" /> : <Send className="w-3.5 h-3.5 pointer-events-none" />} <span className="hidden sm:inline">Sollecita</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {pendingPeople.length === 0 && (
-                  <div className="bg-white dark:bg-slate-900 py-16 rounded-[2.5rem] border border-dashed border-slate-200 dark:border-white/5 text-center">
-                    <CheckCircle className="w-12 h-12 text-emerald-500/20 mx-auto mb-4" />
-                    <p className="text-slate-400 font-medium italic">Tutti i membri hanno consegnato il form!</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'SIGNED' && (
-            <div className="space-y-8 animate-fade-in">
-              <div className="flex justify-between items-center flex-wrap gap-4">
-                <div>
-                  <h2 className="text-3xl font-black text-slate-900 dark:text-white">Risposte Form</h2>
-                  <p className="text-slate-500 text-sm font-medium">Membri che hanno completato il form.</p>
-                </div>
-                <button onClick={() => tallyCsvInputRef.current?.click()} disabled={isImportingTallyCsv} className="px-6 py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 flex items-center gap-2 transition-all disabled:opacity-50" title="Importa il CSV scaricato dalla sezione Submissions di Tally">
-                  {isImportingTallyCsv ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} Importa CSV
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {signedPeople.map(p => {
-                  let formData: any = null;
-                  if (p.fieldsJSON) {
-                    try {
-                      formData = JSON.parse(p.fieldsJSON);
-                    } catch (e) {}
-                  } else {
-                    // Fallback to old auditJSON if it exists
-                    const personInstances = data.instances.filter(i => i.personId === p.id && i.status === DocStatus.SIGNED);
-                    if (personInstances.length > 0 && personInstances[0].auditJSON) {
-                      try {
-                        const audit = JSON.parse(personInstances[0].auditJSON);
-                        formData = audit.formData;
-                      } catch (e) {}
-                    }
-                  }
-
-                  return (
-                    <div key={p.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm overflow-hidden transition-all">
-                      <div 
-                        onClick={() => setExpandedSignedPersonId(expandedSignedPersonId === p.id ? null : p.id)}
-                        className="p-4 flex flex-row items-center justify-between gap-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-black text-sm truncate text-slate-900 dark:text-white">{p.name}</h4>
-                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{p.role}</p>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedPersonForTemplate(p);
-                              setIsTemplateSelectModalOpen(true);
-                            }}
-                            className="p-2 text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all"
-                            title="Scarica PDF compilato"
-                          >
-                            <Download className="w-5 h-5 pointer-events-none" />
-                          </button>
-                          <div className="p-2 text-slate-400">
-                            {expandedSignedPersonId === p.id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {expandedSignedPersonId === p.id && formData && (
-                        <div className="p-5 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-slate-800/50 animate-fade-in">
-                          <h5 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">Dati Inseriti</h5>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                            {Object.entries(formData).map(([key, value]) => {
-                              const lowerKey = key.toLowerCase().trim();
-                              const strValue = String(value);
-                              
-                              // Hide unwanted fields
-                              if (
-                                !value || 
-                                lowerKey === 'nome e cognome' || 
-                                lowerKey === 'pid' || 
-                                lowerKey === 'mid' || 
-                                lowerKey === 'data emissione' || 
-                                lowerKey === 'data di emissione' || 
-                                 lowerKey === 'scadenza' ||
-                                 lowerKey === 'datanascita' ||
-                                 lowerKey === 'luogonascita' ||
-                                 lowerKey === 'cf'
-                              ) return null;
-
-                              // Check if it's a signature/file link
-                              const signatureUrl = extractCsvFileUrl(strValue);
-                              const isFirma = lowerKey.includes('firma') || lowerKey.includes('signature') || strValue.includes('storage.tally.so');
-
-                              return (
-                                <div key={key} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-white/5">
-                                  <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider mb-1">{key}</p>
-                                  {isFirma && signatureUrl ? (
-                                    <a 
-                                      href={signatureUrl} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      download="firma.jpg"
-                                      className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-500/20 transition-colors"
-                                    >
-                                      <Download className="w-3.5 h-3.5" /> Scarica Firma
-                                    </a>
-                                  ) : (
-                                    <p className="text-sm font-medium text-slate-900 dark:text-white truncate" title={strValue}>{strValue}</p>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                          {/* Removed the old hardcoded Firma image block since it's now handled in the loop */}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {signedPeople.length === 0 && (
-                  <div className="bg-white dark:bg-slate-900 py-16 rounded-[2.5rem] border border-dashed border-slate-200 dark:border-white/5 text-center">
-                    <FileCheck className="w-12 h-12 text-slate-200 dark:text-white/10 mx-auto mb-4" />
-                    <p className="text-slate-400 font-medium italic">Nessuna risposta al momento.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'TEMPLATES' && (
-            <div className="space-y-8 animate-fade-in">
-              <div className="flex justify-between items-center flex-wrap gap-4">
-                <div>
-                  <h2 className="text-3xl font-black text-slate-900 dark:text-white">Libreria Template</h2>
-                  <p className="text-slate-500 text-sm font-medium">Gestisci i modelli di documento PDF per la produzione.</p>
-                </div>
-                <div className="flex gap-3">
-                  <input type="file" ref={templateInputRef} accept=".pdf" onChange={handleTemplateUpload} className="hidden" />
-                  <button type="button" onClick={() => templateInputRef.current?.click()} className="px-6 py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 flex items-center gap-2 transition-all">
-                    <FilePlus className="w-4 h-4 pointer-events-none" /> Importa Template PDF
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {data.templates.map(t => (
-                  <div key={t.id} className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm flex items-center justify-between gap-4 hover:border-indigo-500/30 transition-all">
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                      <div className="p-3 bg-slate-100 dark:bg-white/5 rounded-xl text-slate-400">
-                        <FileIcon className="w-5 h-5 pointer-events-none" />
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="font-black text-sm truncate text-slate-900 dark:text-white">{t.name}</h4>
-                        <div className="flex items-center gap-3 mt-1">
-                          <span className="text-[9px] font-black uppercase text-indigo-500 tracking-wider">{t.type}</span>
-                          <span className="text-[9px] text-slate-400 font-bold">{new Date(t.createdAt).toLocaleDateString()}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <a href={t.fileUrl} target="_blank" rel="noreferrer" className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-xl transition-all">
-                        <Eye className="w-5 h-5 pointer-events-none" />
-                      </a>
-                      <button type="button" onClick={(e) => handleDeleteTemplate(t.id, e)} className="relative z-10 p-2.5 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-all">
-                        <Trash2 className="w-5 h-5 pointer-events-none" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {data.templates.length === 0 && (
-                  <div className="bg-white dark:bg-slate-900 py-16 rounded-[2.5rem] border border-dashed border-slate-200 dark:border-white/5 text-center">
-                    <FileText className="w-12 h-12 text-slate-200 dark:text-white/10 mx-auto mb-4" />
-                    <p className="text-slate-400 font-medium italic">Nessun template in libreria. Carica un file PDF per iniziare.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </main>
-      </div>
-
-      {/* Internal Confirmation Modal for Deletions */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl border border-white/10 animate-fade-in">
-            <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-2xl flex items-center justify-center mb-6 mx-auto">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <h3 className="text-xl font-black mb-2 text-center text-slate-900 dark:text-white uppercase tracking-tight">
-              Eliminare?
-            </h3>
-            <p className="text-slate-500 dark:text-slate-400 text-sm text-center mb-8 font-medium">
-              Stai per eliminare <strong>{deleteTarget.name}</strong>. Questa azione non può essere annullata.
-            </p>
-            <div className="flex gap-4">
-              <button 
-                type="button" 
-                onClick={() => setDeleteTarget(null)} 
-                className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest"
-              >
-                Annulla
-              </button>
-              <button 
-                type="button" 
-                onClick={executeDelete} 
-                className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-red-600/20"
-              >
-                Elimina
-              </button>
-            </div>
-          </div>
-        </div>
+      {tab === 'PEOPLE' && (
+        <button type="button" aria-label="Aggiungi persona" onClick={() => setDialog({ kind: 'person' })}
+          className="fixed bottom-20 right-4 z-30 inline-flex h-14 w-14 items-center justify-center bg-ink text-paper shadow-lg lg:hidden">
+          <Plus className="h-6 w-6" />
+        </button>
       )}
 
-      {isSettingsModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10 my-8">
-            <h3 className="text-2xl font-black mb-6 text-slate-900 dark:text-white">Impostazioni Produzione</h3>
-            
-            <div className="space-y-6">
-              <div>
-                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Link Form Tally</label>
-                <p className="text-slate-400 text-xs mb-3 font-medium">Inserisci l'URL del form Tally. Verranno aggiunti automaticamente i parametri pid e mid.</p>
-                <input value={formLinkInput} onChange={e => setFormLinkInput(e.target.value)} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-bold outline-none text-slate-900 dark:text-white" placeholder="https://tally.so/r/XXXXXX" />
-              </div>
-
-              <div>
-                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Messaggio WhatsApp (Iniziale)</label>
-                <p className="text-slate-400 text-xs mb-3 font-medium">Usa le variabili: <code className="bg-slate-100 dark:bg-white/10 px-1 py-0.5 rounded">{"{{nome}}"}</code>, <code className="bg-slate-100 dark:bg-white/10 px-1 py-0.5 rounded">{"{{titolo_produzione}}"}</code>, <code className="bg-slate-100 dark:bg-white/10 px-1 py-0.5 rounded">{"{{link_form}}"}</code></p>
-                <textarea 
-                  value={whatsappMessageInput} 
-                  onChange={e => {
-                    const val = e.target.value;
-                    const required = ["{{nome}}", "{{titolo_produzione}}", "{{link_form}}"];
-                    if (required.every(r => val.includes(r))) {
-                      setWhatsappMessageInput(val);
-                    }
-                  }} 
-                  className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-medium outline-none text-slate-900 dark:text-white min-h-[120px] resize-y" 
-                  placeholder="Ciao {{nome}}! Compila questi dati per la produzione '{{titolo_produzione}}':&#10;&#10;{{link_form}}&#10;&#10;I tuoi dati verranno gestiti nella piena sicurezza."
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Messaggio WhatsApp (Sollecito)</label>
-                <textarea 
-                  value={whatsappSolicitInput} 
-                  onChange={e => {
-                    const val = e.target.value;
-                    const required = ["{{nome}}", "{{titolo_produzione}}", "{{link_form}}"];
-                    if (required.every(r => val.includes(r))) {
-                      setWhatsappSolicitInput(val);
-                    }
-                  }} 
-                  className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-medium outline-none text-slate-900 dark:text-white min-h-[100px] resize-y" 
-                  placeholder="Ciao {{nome}},&#10;{{link_form}}&#10;ricordati di firmare i documenti necessari per il set di '{{titolo_produzione}}'."
-                />
-              </div>
-
-              <div className="flex gap-4 pt-2">
-                <button type="button" onClick={() => setIsSettingsModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
-                <button type="button" onClick={handleSaveSettings} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Salva</button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {dialog?.kind === 'person' && (
+        <PersonModal initial={dialog.person} onClose={() => setDialog(null)} onSave={draft => savePerson(draft, dialog.person)} />
       )}
-
-      {isRecipientModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
-            <h3 className="text-2xl font-black mb-6 text-slate-900 dark:text-white">Invia Modulo</h3>
-            
-            <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-2">
-              {pendingPeople.map(p => (
-                <button key={p.id} type="button" onClick={() => handleSendWhatsApp(p)} className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl hover:border-emerald-500 transition-all">
-                  <div className="text-left"><p className="font-bold text-slate-900 dark:text-white">{p.name}</p><p className="text-[10px] uppercase text-slate-400 font-black">{p.role}</p></div>
-                  {p.sentAt ? <Check className="w-4 h-4 text-emerald-600 pointer-events-none" /> : <Send className="w-4 h-4 text-emerald-600 pointer-events-none" />}
-                </button>
-              ))}
-              {pendingPeople.length === 0 && <p className="text-center py-10 text-slate-400 font-medium italic">Nessun membro in attesa.</p>}
-            </div>
-            <button type="button" onClick={() => setIsRecipientModalOpen(false)} className="w-full mt-6 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-bold uppercase text-[10px] tracking-widest font-black">Chiudi</button>
-          </div>
-        </div>
+      {dialog?.kind === 'production' && <ProductionModal onClose={() => setDialog(null)} onSave={createProduction} />}
+      {dialog?.kind === 'settings' && (
+        <SettingsModal production={production} data={data} accountEmail={email}
+          onClose={() => setDialog(null)}
+          onSave={patch => { setData(prev => ({ ...prev, productions: prev.productions.map(p => (p.id === production.id ? { ...p, ...patch } : p)) })); setDialog(null); toast('Impostazioni salvate.'); }}
+          onDeleteProduction={() => setDialog({ kind: 'delete-production' })}
+          onRestore={restoreBackup}
+          onSignOut={supabase && userId ? () => { supabase?.auth.signOut(); } : undefined} />
       )}
-
-      {editingPerson && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
-            <h3 className="text-2xl font-black mb-8 text-slate-900 dark:text-white">Modifica Membro</h3>
-            <div className="space-y-4">
-              <input value={editingPerson.name} onChange={e => setEditingPerson({...editingPerson, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Nome e Cognome" />
-              <input value={editingPerson.role} onChange={e => setEditingPerson({...editingPerson, role: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Ruolo" />
-              <input value={editingPerson.whatsapp} onChange={e => setEditingPerson({...editingPerson, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Numero WhatsApp" />
-              <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setEditingPerson(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
-                <button type="button" onClick={handleSaveEditedPerson} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Salva</button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {dialog?.kind === 'import' && (
+        <ImportReviewModal members={dialog.members} onClose={() => setDialog(null)}
+          onConfirm={members => {
+            setData(prev => ({ ...prev, people: [...prev.people, ...members.map(m => ({ ...m, name: m.name.trim(), whatsapp: normalizePhone(m.whatsapp) }))] }));
+            setDialog(null);
+            setTab('PEOPLE');
+            toast(`${members.length} persone aggiunte.`);
+          }} />
       )}
-
-      {isNewProdModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
-            <h3 className="text-2xl font-black mb-8 text-slate-900 dark:text-white">Nuova Produzione</h3>
-            <div className="space-y-4">
-              <input value={newProdData.title} onChange={e => setNewProdData({...newProdData, title: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Titolo Progetto" />
-              <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setIsNewProdModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
-                <button type="button" onClick={handleCreateProduction} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Crea Progetto</button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {dialog?.kind === 'pdf' && (
+        <GeneratePdfModal person={dialog.person} templates={data.templates} busy={busy.pdf}
+          onClose={() => setDialog(null)} onGenerate={templateId => generatePdf(dialog.person, templateId)} />
       )}
-
-      {isNewMemberModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
-            <h3 className="text-2xl font-black mb-8 text-slate-900 dark:text-white">Aggiungi Membro</h3>
-            <div className="space-y-4">
-              <input value={newMemberData.name} onChange={e => setNewMemberData({...newMemberData, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Nome Completo" />
-              <input value={newMemberData.whatsapp} onChange={e => setNewMemberData({...newMemberData, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="WhatsApp (es: +39333...)" />
-              <input value={newMemberData.role} onChange={e => setNewMemberData({...newMemberData, role: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Ruolo" />
-              <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setIsNewMemberModalOpen(false)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
-                <button type="button" onClick={handleAddMember} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Aggiungi</button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {dialog?.kind === 'delete-person' && (
+        <ConfirmModal title="Eliminare?" confirmLabel="Elimina" onClose={() => setDialog(null)}
+          text={<>Stai per eliminare <strong>{dialog.person.name}</strong> e le sue risposte. Non si può annullare.</>}
+          onConfirm={() => { setData(prev => ({ ...prev, people: prev.people.filter(p => p.id !== dialog.person.id) })); setDialog(null); }} />
       )}
-
-      {pendingImportMembers && !editingPendingMember && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl border border-white/10 max-h-[90vh] flex flex-col">
-            <h3 className="text-2xl font-black mb-2 text-slate-900 dark:text-white">Revisione Membri</h3>
-            <p className="text-slate-500 text-sm mb-6 font-medium">Controlla i membri estratti. Clicca su un membro per modificarne i dettagli prima di confermare l'importazione.</p>
-            
-            <div className="space-y-2 overflow-y-auto custom-scrollbar pr-2 flex-1 min-h-0">
-              {pendingImportMembers.map(p => (
-                <button key={p.id} type="button" onClick={() => setEditingPendingMember(p)} className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl hover:border-indigo-500 transition-all text-left group">
-                  <div>
-                    <p className="font-bold text-slate-900 dark:text-white">{p.name}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] uppercase text-slate-400 font-black">{p.role}</span>
-                      {p.whatsapp && (
-                        <>
-                          <span className="text-[10px] text-slate-300 dark:text-slate-600">•</span>
-                          <span className="text-[10px] uppercase text-slate-400 font-black">{p.whatsapp}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <Edit2 className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors" />
-                </button>
-              ))}
-            </div>
-            
-            <div className="flex gap-4 pt-6 mt-auto">
-              <button type="button" onClick={() => setPendingImportMembers(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
-              <button type="button" onClick={handleConfirmImport} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Conferma Importazione</button>
-            </div>
-          </div>
-        </div>
+      {dialog?.kind === 'delete-template' && (
+        <ConfirmModal title="Eliminare?" confirmLabel="Elimina" onClose={() => setDialog(null)}
+          text={<>Stai per eliminare il template <strong>{dialog.template.name}</strong> e il suo PDF. Non si può annullare.</>}
+          onConfirm={() => deleteTemplate(dialog.template)} />
       )}
-
-      {editingPendingMember && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
-            <h3 className="text-2xl font-black mb-8 text-slate-900 dark:text-white">Correggi Membro</h3>
-            <div className="space-y-4">
-              <input value={editingPendingMember.name} onChange={e => setEditingPendingMember({...editingPendingMember, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Nome e Cognome" />
-              <input value={editingPendingMember.role} onChange={e => setEditingPendingMember({...editingPendingMember, role: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Ruolo" />
-              <input value={editingPendingMember.whatsapp} onChange={e => setEditingPendingMember({...editingPendingMember, whatsapp: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 outline-none font-bold text-slate-900 dark:text-white" placeholder="Numero WhatsApp" />
-              <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setEditingPendingMember(null)} className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest">Annulla</button>
-                <button type="button" onClick={handleSaveEditedPendingMember} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Salva Modifiche</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {isTemplateSelectModalOpen && selectedPersonForTemplate && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-white/10">
-            <h3 className="text-2xl font-black mb-2 text-slate-900 dark:text-white">Genera PDF</h3>
-            <p className="text-slate-500 text-sm mb-6 font-medium">
-              Seleziona un template da compilare con i dati di <strong>{selectedPersonForTemplate.name}</strong>.
-            </p>
-            <div className="space-y-4">
-              <select
-                value={selectedTemplateId}
-                onChange={e => setSelectedTemplateId(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl px-6 py-4 font-bold outline-none text-slate-900 dark:text-white appearance-none"
-              >
-                <option value="">-- Seleziona un Template --</option>
-                {data.templates.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-              <div className="flex gap-4 pt-4">
-                <button 
-                  type="button" 
-                  onClick={() => {
-                    setIsTemplateSelectModalOpen(false);
-                    setSelectedTemplateId('');
-                  }} 
-                  className="flex-1 py-4 bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest"
-                >
-                  Annulla
-                </button>
-                <button 
-                  type="button" 
-                  onClick={handleGeneratePdf} 
-                  disabled={!selectedTemplateId || isGeneratingPdf}
-                  className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {isGeneratingPdf ? (
-                    <><RefreshCw className="w-4 h-4 animate-spin" /> Generazione...</>
-                  ) : (
-                    <><Download className="w-4 h-4" /> Genera e Scarica</>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {dialog?.kind === 'delete-production' && (
+        <ConfirmModal title="Eliminare la produzione?" confirmLabel="Elimina produzione" onClose={() => setDialog(null)}
+          text={<>Stai per eliminare <strong>{production.title}</strong> con tutte le sue {people.length} persone e risposte. Non si può annullare: se serve, esporta prima un backup dalle impostazioni.</>}
+          onConfirm={deleteProduction} />
       )}
     </div>
   );
 };
 
-export default App;
+/** Con Supabase configurato serve l'accesso; senza, l'app lavora in locale come prima. */
+const App: React.FC = () => {
+  const [session, setSession] = useState<Session | null | undefined>(supabase ? undefined : null);
 
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
+    return () => subscription.unsubscribe();
+  }, []);
+
+  return (
+    <ToastProvider>
+      {session === undefined ? (
+        <div className="flex min-h-dvh items-center justify-center gap-3 text-ink-soft"><RefreshCw className="h-4 w-4 animate-spin" /> Caricamento…</div>
+      ) : supabase && !session ? (
+        <Login />
+      ) : (
+        <Workspace key={session?.user.id ?? 'local'} userId={session?.user.id ?? null} email={session?.user.email ?? null} />
+      )}
+    </ToastProvider>
+  );
+};
+
+export default App;
