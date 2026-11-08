@@ -1,0 +1,16 @@
+{
+  "name": "DocuSet · SmartSet",
+  "short_name": "DocuSet",
+  "description": "Documenti di cast e troupe in un posto solo.",
+  "lang": "it",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F3EEE3",
+  "theme_color": "#E8DFC9",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
