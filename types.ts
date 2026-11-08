@@ -52,12 +52,23 @@ export interface Person {
   solicitedAt?: string; // Data di sollecito WhatsApp
 }
 
+/** Campo del modulo DocuSet compilato da cast e troupe. */
+export interface FormField {
+  id: string;
+  label: string;
+  type: 'text' | 'email' | 'tel' | 'date' | 'textarea' | 'file' | 'signature';
+  required: boolean;
+}
+
 export interface Production {
   id: string;
   title: string;
   createdAt: string;
   notes?: string;
   producerPhone?: string;
+  /** 'docuset' = modulo interno (serve Supabase); 'tally' = link esterno in `formLink`. */
+  formMode?: 'docuset' | 'tally';
+  formFields?: FormField[];
   formLink?: string;
   whatsappMessageTemplate?: string;
   whatsappSolicitTemplate?: string;

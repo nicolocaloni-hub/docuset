@@ -51,3 +51,24 @@ test('mergeTallySubmissions links by mid, then by name, else creates a member', 
   assert.equal(created?.productionId, 'p1');
   assert.equal(people[0].deliveredAt, undefined, 'input must not be mutated');
 });
+
+test('buildMessage uses the personal DocuSet link when given', () => {
+  const message = buildMessage('invite', production, person(), 'https://app.example/m/abc');
+  assert.match(message, /https:\/\/app\.example\/m\/abc/);
+  assert.doesNotMatch(message, /pid=/);
+});
+
+test('applySubmissions marks only people with a new submission', async () => {
+  const { applySubmissions } = await import('../lib/forms');
+  const people = [person(), person({ id: 'per-2', deliveredAt: '2026-11-01T00:00:00Z' }), person({ id: 'per-3' })];
+  const result = applySubmissions(people, [
+    { person_id: 'per-1', production_id: 'p1', data: { CF: 'X' }, submitted_at: '2026-11-08T10:00:00Z' },
+    { person_id: 'per-2', production_id: 'p1', data: {}, submitted_at: '2026-11-01T00:00:00Z' },
+    { person_id: 'per-3', production_id: 'altra', data: {}, submitted_at: '2026-11-08T10:00:00Z' },
+  ]);
+  assert.equal(result.changed, 1);
+  assert.equal(result.people[0].deliveredAt, '2026-11-08T10:00:00Z');
+  assert.equal(result.people[0].fieldsJSON, '{"CF":"X"}');
+  assert.equal(result.people[2].deliveredAt, undefined);
+  assert.equal(people[0].deliveredAt, undefined, 'input must not be mutated');
+});

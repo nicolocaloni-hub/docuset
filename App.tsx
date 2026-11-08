@@ -5,6 +5,7 @@ import { type AppState, type Person, type Template, TemplateType } from './types
 import { supabase } from './lib/supabase';
 import { type SyncStatus, useAppData } from './lib/useAppData';
 import { deleteTemplateFile, fetchTemplateBytes, storeTemplateFile, templateFileUrl } from './lib/templateFiles';
+import { applySubmissions, deleteFormData, ensureFormLink, fetchFormState, formUrl, isSubmissionFile, submissionFileUrl, usesDocusetForm } from './lib/forms';
 import { extractCrewMembersFromFile, normalizePhone } from './services/documentExtraction';
 import { keepLatestTallySubmissions, parseTallyCsvFile } from './services/tallyCsv';
 import { mergeTallySubmissions } from './services/tallyMerge';
@@ -13,6 +14,7 @@ import { buildPersonPdf } from './services/personPdf';
 import { Button, ToastProvider, useToast } from './components/ui';
 import { ConfirmModal, GeneratePdfModal, ImportReviewModal, PersonModal, ProductionModal, SettingsModal, type PersonDraft } from './components/modals';
 import Login from './components/Login';
+import PublicForm from './views/PublicForm';
 import Dashboard from './views/Dashboard';
 import PeopleList from './views/PeopleList';
 import Responses from './views/Responses';
@@ -58,6 +60,11 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
   const documentInput = useRef<HTMLInputElement>(null);
   const csvInput = useRef<HTMLInputElement>(null);
   const templateInput = useRef<HTMLInputElement>(null);
+  const formsEnabled = Boolean(supabase && userId);
+  const [formTokens, setFormTokens] = useState<Map<string, string>>(new Map());
+  const [refreshing, setRefreshing] = useState(false);
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   const production = data?.productions.find(p => p.id === selectedId) ?? data?.productions[0];
   const productionId = production?.id ?? null;
@@ -76,17 +83,91 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
     setData(prev => ({ ...prev, people: prev.people.map(p => (p.id === id ? { ...p, ...patch } : p)) }));
   }, [setData]);
 
+  /* ---------- Modulo DocuSet: risposte in arrivo ---------- */
+
+  const refreshForms = useCallback(async (manual = false) => {
+    if (!formsEnabled || !dataRef.current) return;
+    if (manual) setRefreshing(true);
+    try {
+      const { tokens, submissions } = await fetchFormState();
+      setFormTokens(tokens);
+      const { changed } = applySubmissions(dataRef.current.people, submissions);
+      if (changed) {
+        setData(prev => ({ ...prev, people: applySubmissions(prev.people, submissions).people }));
+        toast(changed === 1 ? 'È arrivato un nuovo modulo compilato.' : `Sono arrivati ${changed} nuovi moduli compilati.`);
+      } else if (manual) {
+        toast('Nessuna risposta nuova.');
+      }
+    } catch (err) {
+      if (manual) toast(`Non riesco a leggere le risposte: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      if (manual) setRefreshing(false);
+    }
+  }, [formsEnabled, setData, toast]);
+
+  // Controlla le risposte all'apertura, quando si torna sulla scheda e ogni minuto.
+  const dataLoaded = Boolean(data);
+  useEffect(() => {
+    if (!formsEnabled || !dataLoaded) return;
+    refreshForms();
+    const onFocus = () => { if (document.visibilityState === 'visible') refreshForms(); };
+    document.addEventListener('visibilitychange', onFocus);
+    const timer = window.setInterval(onFocus, 60_000);
+    return () => { document.removeEventListener('visibilitychange', onFocus); window.clearInterval(timer); };
+  }, [formsEnabled, dataLoaded, refreshForms]);
+
   /* ---------- WhatsApp ---------- */
 
-  const sendWhatsApp = (person: Person) => {
-    if (!production?.formLink) {
+  const sendWhatsApp = async (person: Person) => {
+    if (!production) return;
+    const docuset = usesDocusetForm(production, formsEnabled);
+    if (!docuset && !production.formLink) {
       toast('Prima imposta il link del modulo Tally.', 'error');
       setDialog({ kind: 'settings' });
       return;
     }
     const solicit = Boolean(person.sentAt);
-    window.open(whatsappUrl(person.whatsapp, buildMessage(solicit ? 'solicit' : 'invite', production, person), navigator.userAgent), '_blank');
+    const open = (link?: string) => whatsappUrl(person.whatsapp, buildMessage(solicit ? 'solicit' : 'invite', production, person, link), navigator.userAgent);
+
+    if (!docuset) {
+      window.open(open(), '_blank');
+    } else {
+      const known = formTokens.get(`${production.id}/${person.id}`);
+      // Senza token in memoria va creato: apro subito la finestra, dopo un await i browser bloccano i popup.
+      const win = known ? null : window.open('', '_blank');
+      try {
+        const token = known ?? await ensureFormLink(userId!, production, person);
+        if (known) {
+          window.open(open(formUrl(token)), '_blank');
+          ensureFormLink(userId!, production, person).catch(() => { /* aggiorna solo campi e scadenza */ });
+        } else {
+          setFormTokens(map => new Map(map).set(`${production.id}/${person.id}`, token));
+          if (win) win.location.href = open(formUrl(token)); else window.open(open(formUrl(token)), '_blank');
+        }
+      } catch (err) {
+        win?.close();
+        toast(err instanceof Error ? err.message : 'Non riesco a creare il link del modulo.', 'error');
+        return;
+      }
+    }
     updatePerson(person.id, solicit ? { solicitedAt: new Date().toISOString() } : { sentAt: new Date().toISOString() });
+  };
+
+  const openSubmissionFile = async (value: string) => {
+    const win = window.open('', '_blank');
+    try {
+      const url = await submissionFileUrl(value);
+      if (win) win.location.href = url; else window.open(url, '_blank');
+    } catch (err) {
+      win?.close();
+      toast(err instanceof Error ? err.message : 'Non riesco ad aprire il file.', 'error');
+    }
+  };
+
+  const removeFormData = (productionIdToClear: string, personIds?: string[]) => {
+    if (!formsEnabled) return;
+    deleteFormData(productionIdToClear, personIds).catch(() =>
+      toast('Le risposte al modulo restano su Supabase: riprova a eliminare più tardi.', 'error'));
   };
 
   /* ---------- Import lista troupe (DOCX/PDF) ---------- */
@@ -194,7 +275,13 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       let formData: Record<string, unknown> | null = null;
       try { formData = person.fieldsJSON ? JSON.parse(person.fieldsJSON) : null; } catch { /* dati corrotti */ }
       if (!formData) throw new Error('Per questa persona non ci sono dati importati da Tally.');
-      const bytes = await buildPersonPdf(template, await fetchTemplateBytes(template.fileUrl), { nome: person.name, ...formData });
+      // File del modulo DocuSet: la firma diventa un link firmato, gli altri allegati non vanno nel PDF.
+      const resolved: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(formData)) {
+        if (!isSubmissionFile(value)) resolved[key] = value;
+        else if (/firma|signature/i.test(key)) resolved[key] = await submissionFileUrl(value as string);
+      }
+      const bytes = await buildPersonPdf(template, await fetchTemplateBytes(template.fileUrl), { nome: person.name, ...resolved });
       const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
       const a = document.createElement('a');
       a.href = url;
@@ -236,6 +323,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
         people: prev.people.filter(p => p.productionId !== productionId),
       };
     });
+    removeFormData(productionId);
     setSelectedId(null);
     setDialog(null);
   };
@@ -337,7 +425,8 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
           <Dashboard production={production} people={people} templatesCount={data.templates.length}
             onOpenPeople={() => setTab('PEOPLE')} onOpenPending={() => setTab('REQUESTS')} onOpenTemplates={() => setTab('TEMPLATES')}
             onOpenSettings={() => setDialog({ kind: 'settings' })} onImportDocument={() => documentInput.current?.click()}
-            onAdd={() => setDialog({ kind: 'person' })} onSolicit={sendWhatsApp} />
+            onAdd={() => setDialog({ kind: 'person' })} onSolicit={sendWhatsApp}
+            formReady={usesDocusetForm(production, formsEnabled) || Boolean(production.formLink)} />
         )}
         {(tab === 'PEOPLE' || tab === 'REQUESTS') && (
           <PeopleList key={tab} mode={tab === 'PEOPLE' ? 'all' : 'pending'} people={people}
@@ -348,7 +437,9 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
         )}
         {tab === 'SIGNED' && (
           <Responses people={delivered} importing={busy.csv} onImportCsv={() => csvInput.current?.click()}
-            onGeneratePdf={person => setDialog({ kind: 'pdf', person })} />
+            onGeneratePdf={person => setDialog({ kind: 'pdf', person })}
+            onOpenFile={openSubmissionFile}
+            onRefresh={formsEnabled ? () => refreshForms(true) : undefined} refreshing={refreshing} />
         )}
         {tab === 'TEMPLATES' && (
           <Templates templates={data.templates} uploading={busy.template} onUpload={() => templateInput.current?.click()}
@@ -383,7 +474,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       )}
       {dialog?.kind === 'production' && <ProductionModal onClose={() => setDialog(null)} onSave={createProduction} />}
       {dialog?.kind === 'settings' && (
-        <SettingsModal production={production} data={data} accountEmail={email}
+        <SettingsModal production={production} data={data} accountEmail={email} formsEnabled={formsEnabled}
           onClose={() => setDialog(null)}
           onSave={patch => { setData(prev => ({ ...prev, productions: prev.productions.map(p => (p.id === production.id ? { ...p, ...patch } : p)) })); setDialog(null); toast('Impostazioni salvate.'); }}
           onDeleteProduction={() => setDialog({ kind: 'delete-production' })}
@@ -406,7 +497,11 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       {dialog?.kind === 'delete-person' && (
         <ConfirmModal title="Eliminare?" confirmLabel="Elimina" onClose={() => setDialog(null)}
           text={<>Stai per eliminare <strong>{dialog.person.name}</strong> e le sue risposte. Non si può annullare.</>}
-          onConfirm={() => { setData(prev => ({ ...prev, people: prev.people.filter(p => p.id !== dialog.person.id) })); setDialog(null); }} />
+          onConfirm={() => {
+            setData(prev => ({ ...prev, people: prev.people.filter(p => p.id !== dialog.person.id) }));
+            removeFormData(dialog.person.productionId, [dialog.person.id]);
+            setDialog(null);
+          }} />
       )}
       {dialog?.kind === 'delete-template' && (
         <ConfirmModal title="Eliminare?" confirmLabel="Elimina" onClose={() => setDialog(null)}
@@ -423,7 +518,15 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
 };
 
 /** Con Supabase configurato serve l'accesso; senza, l'app lavora in locale come prima. */
+// Link personale del modulo: /m/<token di 24 caratteri>, aperto senza login.
+const formToken = window.location.pathname.match(/^\/m\/([A-Za-z0-9_-]{24})\/?$/)?.[1];
+
 const App: React.FC = () => {
+  if (formToken) return <PublicForm token={formToken} />;
+  return <AuthenticatedApp />;
+};
+
+const AuthenticatedApp: React.FC = () => {
   const [session, setSession] = useState<Session | null | undefined>(supabase ? undefined : null);
 
   useEffect(() => {

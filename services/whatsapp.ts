@@ -21,11 +21,13 @@ export const buildMessage = (
   kind: 'invite' | 'solicit',
   production: Production,
   person: Person,
+  /** Link personale del modulo DocuSet; senza, si usa il link Tally con pid e mid. */
+  personalLink?: string,
 ) => {
   const template = kind === 'invite'
     ? production.whatsappMessageTemplate || DEFAULT_INVITE_TEMPLATE
     : production.whatsappSolicitTemplate || DEFAULT_SOLICIT_TEMPLATE;
-  const link = buildFormLink(production.formLink || '', production.id, person.id);
+  const link = personalLink ?? buildFormLink(production.formLink || '', production.id, person.id);
   return template
     .replace(/{{nome}}/g, person.name.split(' ')[0] || '')
     .replace(/{{titolo_produzione}}/g, production.title || '')

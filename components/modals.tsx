@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { Download, LogOut, Trash2, Upload } from 'lucide-react';
-import type { AppState, Person, Production, Template } from '../types';
+import { Download, LogOut, Plus, Trash2, Upload, X } from 'lucide-react';
+import type { AppState, FormField, Person, Production, Template } from '../types';
+import { PRESET_FIELDS, productionFields } from '../lib/forms';
 import { DEFAULT_INVITE_TEMPLATE, DEFAULT_SOLICIT_TEMPLATE, TEMPLATE_VARIABLES, missingVariables } from '../services/whatsapp';
 import { normalizeState } from '../lib/useAppData';
 import { Button, Field, IconButton, Input, Modal, inputClass } from './ui';
@@ -58,13 +59,18 @@ export const SettingsModal: React.FC<{
   production: Production;
   data: AppState;
   accountEmail: string | null;
-  onSave: (patch: Pick<Production, 'title' | 'formLink' | 'whatsappMessageTemplate' | 'whatsappSolicitTemplate'>) => void;
+  /** Modulo DocuSet disponibile (Supabase collegato e accesso fatto). */
+  formsEnabled: boolean;
+  onSave: (patch: Pick<Production, 'title' | 'formLink' | 'formMode' | 'formFields' | 'whatsappMessageTemplate' | 'whatsappSolicitTemplate'>) => void;
   onDeleteProduction: () => void;
   onRestore: (state: AppState) => void;
   onSignOut?: () => void;
   onClose: () => void;
-}> = ({ production, data, accountEmail, onSave, onDeleteProduction, onRestore, onSignOut, onClose }) => {
+}> = ({ production, data, accountEmail, formsEnabled, onSave, onDeleteProduction, onRestore, onSignOut, onClose }) => {
   const [title, setTitle] = useState(production.title);
+  const [mode, setMode] = useState<'docuset' | 'tally'>(formsEnabled && production.formMode !== 'tally' ? 'docuset' : 'tally');
+  const [fields, setFields] = useState<FormField[]>(productionFields(production));
+  const [customLabel, setCustomLabel] = useState('');
   const [formLink, setFormLink] = useState(production.formLink || '');
   const [invite, setInvite] = useState(production.whatsappMessageTemplate || DEFAULT_INVITE_TEMPLATE);
   const [solicit, setSolicit] = useState(production.whatsappSolicitTemplate || DEFAULT_SOLICIT_TEMPLATE);
@@ -74,7 +80,19 @@ export const SettingsModal: React.FC<{
   const inviteMissing = missingVariables(invite);
   const solicitMissing = missingVariables(solicit);
   const linkInvalid = formLink.trim() !== '' && !/^https:\/\//.test(formLink.trim());
-  const canSave = title.trim() && !inviteMissing.length && !solicitMissing.length && !linkInvalid;
+  const canSave = title.trim() && !inviteMissing.length && !solicitMissing.length && !linkInvalid && (mode === 'tally' || fields.length > 0);
+
+  // I campi predefiniti restano nel loro ordine; quelli aggiunti a mano vanno in fondo.
+  const togglePreset = (preset: FormField, on: boolean) => setFields(list => on
+    ? [...PRESET_FIELDS.filter(p => p.id === preset.id || list.some(f => f.id === p.id)), ...list.filter(f => !PRESET_FIELDS.some(p => p.id === f.id))]
+    : list.filter(f => f.id !== preset.id));
+  const toggleRequired = (id: string) => setFields(list => list.map(f => (f.id === id ? { ...f, required: !f.required } : f)));
+  const addCustom = () => {
+    const label = customLabel.trim();
+    if (!label) return;
+    setFields(list => [...list, { id: `custom-${crypto.randomUUID().slice(0, 8)}`, label, type: 'text', required: false }]);
+    setCustomLabel('');
+  };
 
   const exportBackup = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -108,12 +126,71 @@ export const SettingsModal: React.FC<{
   return (
     <Modal title="Impostazioni" onClose={onClose} wide
       footer={<><Button variant="ghost" onClick={onClose}>Annulla</Button>
-        <Button disabled={!canSave} onClick={() => onSave({ title: title.trim(), formLink: formLink.trim(), whatsappMessageTemplate: invite, whatsappSolicitTemplate: solicit })}>Salva</Button></>}>
+        <Button disabled={!canSave} onClick={() => onSave({ title: title.trim(), formLink: formLink.trim(), formMode: mode, formFields: fields, whatsappMessageTemplate: invite, whatsappSolicitTemplate: solicit })}>Salva</Button></>}>
       <div className="space-y-5">
         <Field label="Titolo della produzione"><Input value={title} onChange={e => setTitle(e.target.value)} /></Field>
-        <Field label="Link del modulo Tally" hint={linkInvalid ? <span className="text-cue">Deve iniziare con https://</span> : 'A ogni persona arriva il link con pid e mid, così la risposta torna a lei.'}>
-          <Input value={formLink} onChange={e => setFormLink(e.target.value)} placeholder="https://tally.so/r/XXXXXX" inputMode="url" />
-        </Field>
+        <fieldset>
+          <legend className="mb-1.5 text-sm font-medium">Modulo per cast e troupe</legend>
+          {formsEnabled ? (
+            <div className="grid grid-cols-2 gap-1 rounded-[3px] bg-paper-deep p-1" role="radiogroup">
+              {([['docuset', 'Modulo DocuSet'], ['tally', 'Tally']] as const).map(([value, label]) => (
+                <button key={value} type="button" role="radio" aria-checked={mode === value} onClick={() => setMode(value)}
+                  className={`min-h-10 rounded-[3px] text-sm transition-colors ${mode === value ? 'bg-card font-medium shadow-[0_1px_0_var(--color-line)]' : 'text-ink-soft hover:text-ink'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-ink-soft">Il modulo DocuSet (senza Tally, con firma) si attiva collegando Supabase. Intanto puoi usare un modulo Tally.</p>
+          )}
+        </fieldset>
+
+        {mode === 'docuset' ? (
+          <div>
+            <p className="mb-2 text-sm text-ink-soft">Ogni persona riceve un link personale. Scegli cosa chiedere:</p>
+            <ul className="divide-y divide-line rounded-[3px] border border-line bg-card">
+              {PRESET_FIELDS.map(preset => {
+                const current = fields.find(f => f.id === preset.id);
+                return (
+                  <li key={preset.id} className="flex min-h-11 items-center gap-3 px-3">
+                    <label className="flex flex-1 items-center gap-3 text-sm">
+                      <input type="checkbox" className="h-4 w-4 accent-[var(--color-ink)]" checked={Boolean(current)}
+                        disabled={preset.id === 'nome'} onChange={e => togglePreset(preset, e.target.checked)} />
+                      {preset.label}
+                    </label>
+                    {current && preset.id !== 'nome' && (
+                      <button type="button" onClick={() => toggleRequired(preset.id)}
+                        className={`text-xs ${current.required ? 'text-ink' : 'text-ink-soft'} underline-offset-4 hover:underline`}>
+                        {current.required ? 'Obbligatorio' : 'Facoltativo'}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+              {fields.filter(f => !PRESET_FIELDS.some(p => p.id === f.id)).map(field => (
+                <li key={field.id} className="flex min-h-11 items-center gap-3 px-3 text-sm">
+                  <span className="flex-1">{field.label}</span>
+                  <button type="button" onClick={() => toggleRequired(field.id)}
+                    className={`text-xs ${field.required ? 'text-ink' : 'text-ink-soft'} underline-offset-4 hover:underline`}>
+                    {field.required ? 'Obbligatorio' : 'Facoltativo'}
+                  </button>
+                  <IconButton label={`Togli ${field.label}`} tone="danger" onClick={() => setFields(list => list.filter(f => f.id !== field.id))}>
+                    <X className="h-4 w-4" />
+                  </IconButton>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 flex gap-2">
+              <Input value={customLabel} onChange={e => setCustomLabel(e.target.value)} placeholder="Altra domanda, es. Taglia costume"
+                aria-label="Nuova domanda" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } }} />
+              <Button variant="secondary" onClick={addCustom} disabled={!customLabel.trim()} icon={<Plus className="h-4 w-4" />}>Aggiungi</Button>
+            </div>
+          </div>
+        ) : (
+          <Field label="Link del modulo Tally" hint={linkInvalid ? <span className="text-cue">Deve iniziare con https://</span> : 'A ogni persona arriva il link con pid e mid, così la risposta torna a lei.'}>
+            <Input value={formLink} onChange={e => setFormLink(e.target.value)} placeholder="https://tally.so/r/XXXXXX" inputMode="url" />
+          </Field>
+        )}
         <Field label="Messaggio WhatsApp: invio" hint={variablesHint(inviteMissing)}>
           <textarea value={invite} onChange={e => setInvite(e.target.value)} rows={5} className={inputClass} />
         </Field>

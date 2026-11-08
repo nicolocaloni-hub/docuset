@@ -39,3 +39,10 @@
 - [x] Al primo accesso i dati del browser vengono importati online.
 - [x] Backup JSON: esporta e ripristina dalle Impostazioni.
 - [x] Su telefono: navigazione in basso e pulsante + per aggiungere persone.
+
+## Modulo DocuSet (con Supabase)
+- [x] Link personale /m/<token> si apre senza account; link errato o scaduto mostra "Link non valido".
+- [x] Campi obbligatori, documento (foto/PDF ≤ 10 MB), firma col dito e consenso privacy prima dell'invio.
+- [x] La risposta arriva da sola in Risposte (all'apertura, al ritorno sulla scheda, ogni minuto o con "Aggiorna").
+- [x] WhatsApp manda il link personale; firma e documento si aprono con link firmati; la firma finisce nel PDF.
+- [x] Eliminare persona o produzione cancella anche link, risposte e file del modulo.
