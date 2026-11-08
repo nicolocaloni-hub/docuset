@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { CheckCheck, FileText, Search, Send, Trash2, UserPlus } from 'lucide-react';
+import { CheckCheck, FileText, ListOrdered, Search, Send, Trash2, UserPlus } from 'lucide-react';
 import { type DeliveryStatus, type Person, deliveryStatus } from '../types';
 import { Board, Button, EmptyState, IconButton, PageHeader, STATUS_META, StatusChip, Strip, inputClass } from '../components/ui';
 
@@ -22,9 +22,11 @@ interface Props {
   onWhatsApp: (person: Person) => void;
   onImportDocument: () => void;
   importing: boolean;
+  /** Avvia l'invio in sequenza alle persone indicate. */
+  onSendAll: (people: Person[]) => void;
 }
 
-const PeopleList: React.FC<Props> = ({ mode, people, onEdit, onAdd, onDelete, onWhatsApp, onImportDocument, importing }) => {
+const PeopleList: React.FC<Props> = ({ mode, people, onEdit, onAdd, onDelete, onWhatsApp, onImportDocument, importing, onSendAll }) => {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [department, setDepartment] = useState('');
@@ -47,6 +49,13 @@ const PeopleList: React.FC<Props> = ({ mode, people, onEdit, onAdd, onDelete, on
   }, [scoped, query, filter, department]);
 
   const filters = mode === 'pending' ? FILTERS.filter(f => f.id !== 'delivered') : FILTERS;
+  // Rispetta ricerca e filtri: si può mandare a un solo reparto. In "Cast & Crew" vanno solo i "da inviare".
+  const batch = visible.filter(p => p.whatsapp && (mode === 'pending' ? !p.deliveredAt : deliveryStatus(p) === 'todo'));
+  const batchButton = batch.length > 1 && (
+    <Button variant="secondary" className="flex-1 whitespace-nowrap sm:flex-none" onClick={() => onSendAll(batch)} icon={<ListOrdered className="h-4 w-4" />}>
+      {mode === 'pending' ? `Sollecita tutti (${batch.length})` : `Invia a tutti (${batch.length})`}
+    </Button>
+  );
 
   return (
     <section className="animate-enter">
@@ -55,15 +64,16 @@ const PeopleList: React.FC<Props> = ({ mode, people, onEdit, onAdd, onDelete, on
           title="Cast & Crew"
           text="Le persone della produzione e a che punto sono con i documenti."
           actions={<>
-            <Button variant="secondary" className="flex-1 sm:flex-none" onClick={onImportDocument} disabled={importing} icon={<FileText className="h-4 w-4" />}>
+            {batchButton}
+            <Button variant="secondary" className="flex-1 whitespace-nowrap sm:flex-none" onClick={onImportDocument} disabled={importing} icon={<FileText className="h-4 w-4" />}>
               {importing ? 'Lettura…' : 'Importa lista'}
             </Button>
             {/* Su telefono c'è il pulsante + fisso in basso. */}
-            <Button className="hidden lg:inline-flex" onClick={onAdd} icon={<UserPlus className="h-4 w-4" />}>Aggiungi</Button>
+            <Button className="max-lg:hidden" onClick={onAdd} icon={<UserPlus className="h-4 w-4" />}>Aggiungi</Button>
           </>}
         />
       ) : (
-        <PageHeader title="In attesa" text="Chi non ha ancora compilato il modulo. Sollecita su WhatsApp con un tocco." />
+        <PageHeader title="In attesa" text="Chi non ha ancora compilato il modulo. Sollecita su WhatsApp con un tocco." actions={batchButton || undefined} />
       )}
 
       {scoped.length > 0 && (

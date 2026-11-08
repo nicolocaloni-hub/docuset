@@ -3,10 +3,13 @@ import { CheckCircle2, FileUp, RefreshCw } from 'lucide-react';
 import type { FormField } from '../types';
 import { supabase } from '../lib/supabase';
 import { FILE_PREFIX, SUBMISSION_BUCKET } from '../lib/forms';
+import { compressImage } from '../lib/image';
 import SignaturePad, { type SignaturePadHandle } from '../components/SignaturePad';
 import { Button, Field, inputClass } from '../components/ui';
 
-const MAX_FILE = 10 * 1024 * 1024;
+// Le foto vengono compresse prima dell'invio: si accettano originali grandi, il file caricato resta sotto i 10 MB.
+const MAX_PICK = 30 * 1024 * 1024;
+const MAX_UPLOAD = 10 * 1024 * 1024;
 const FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
 
 interface FormInfo {
@@ -15,8 +18,6 @@ interface FormInfo {
   fields: FormField[];
   submitted_at: string | null;
 }
-
-const extension = (file: File) => file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
 
 /** Modulo compilato da cast e troupe dal link personale, senza account. */
 const PublicForm: React.FC<{ token: string }> = ({ token }) => {
@@ -56,9 +57,10 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
       const data: Record<string, string> = {};
       for (const field of info.fields) {
         if (field.type === 'file' && files[field.id]) {
-          const file = files[field.id];
-          const path = `${token}/${field.id}-${crypto.randomUUID()}.${extension(file)}`;
-          const { error: uploadError } = await supabase.storage.from(SUBMISSION_BUCKET).upload(path, file, { contentType: file.type });
+          const { blob, type, ext } = await compressImage(files[field.id]);
+          if (blob.size > MAX_UPLOAD) throw new Error(`“${field.label}” supera i 10 MB anche dopo la compressione: prova con una foto o un PDF più leggero.`);
+          const path = `${token}/${field.id}-${crypto.randomUUID()}.${ext}`;
+          const { error: uploadError } = await supabase.storage.from(SUBMISSION_BUCKET).upload(path, blob, { contentType: type });
           if (uploadError) throw new Error(`Caricamento di “${field.label}” non riuscito.`);
           data[field.label] = FILE_PREFIX + path;
         } else if (field.type === 'signature' && signed[field.id]) {
@@ -144,7 +146,7 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
         if (field.type === 'file') {
           const file = files[field.id];
           return (
-            <Field key={field.id} label={label} hint="Foto dal telefono o PDF, massimo 10 MB.">
+            <Field key={field.id} label={label} hint="Foto dal telefono o PDF. Le foto vengono alleggerite prima dell'invio.">
               <span className={`${inputClass} flex cursor-pointer items-center gap-2 ${file ? 'text-ink' : 'text-ink-soft'}`}>
                 <FileUp className="h-4 w-4 shrink-0" />
                 <span className="truncate">{file ? file.name : 'Scegli o scatta una foto'}</span>
@@ -153,7 +155,7 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
                 onChange={e => {
                   const picked = e.target.files?.[0];
                   if (!picked) return;
-                  if (picked.size > MAX_FILE) { setError('Il file supera i 10 MB.'); return; }
+                  if (picked.size > MAX_PICK) { setError('Il file è troppo grande: massimo 30 MB.'); return; }
                   if (picked.type && !FILE_TYPES.includes(picked.type)) { setError('Formato non accettato: usa una foto (JPG, PNG) o un PDF.'); return; }
                   setError(null);
                   setFiles(f => ({ ...f, [field.id]: picked }));

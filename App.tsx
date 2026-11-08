@@ -12,6 +12,7 @@ import { buildPersonPdf } from './services/personPdf';
 import { Button, ToastProvider, useToast } from './components/ui';
 import { ConfirmModal, GeneratePdfModal, ImportReviewModal, PersonModal, ProductionModal, SettingsModal, type PersonDraft } from './components/modals';
 import Login from './components/Login';
+import SequenceBar, { type SendQueue } from './components/SequenceBar';
 import PublicForm from './views/PublicForm';
 import Dashboard from './views/Dashboard';
 import PeopleList from './views/PeopleList';
@@ -60,6 +61,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
   const formsEnabled = Boolean(supabase && userId);
   const [formTokens, setFormTokens] = useState<Map<string, string>>(new Map());
   const [refreshing, setRefreshing] = useState(false);
+  const [queue, setQueue] = useState<SendQueue | null>(null);
   const dataRef = useRef(data);
   dataRef.current = data;
 
@@ -142,6 +144,39 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       return;
     }
     updatePerson(person.id, solicit ? { solicitedAt: new Date().toISOString() } : { sentAt: new Date().toISOString() });
+  };
+
+  /* ---------- Invio in sequenza ---------- */
+
+  // Crea prima tutti i link mancanti: poi ogni tocco apre WhatsApp subito, senza attese.
+  const startQueue = async (list: Person[]) => {
+    if (!production || !formsEnabled || !userId) {
+      toast('Il modulo funziona solo online: accedi con la tua email per mandare i link.', 'error');
+      return;
+    }
+    const missing = list.filter(p => !formTokens.has(`${production.id}/${p.id}`));
+    setQueue({ people: list, index: 0, preparing: missing.length || null });
+    try {
+      for (let i = 0; i < missing.length; i++) {
+        const token = await ensureFormLink(userId, production, missing[i]);
+        setFormTokens(map => new Map(map).set(`${production.id}/${missing[i].id}`, token));
+        setQueue(q => q && { ...q, preparing: missing.length - i - 1 || null });
+      }
+    } catch (err) {
+      setQueue(null);
+      toast(err instanceof Error ? err.message : 'Non riesco a preparare i link.', 'error');
+    }
+  };
+
+  const advanceQueue = () => {
+    if (!queue) return;
+    const next = queue.index + 1;
+    if (next < queue.people.length) {
+      setQueue({ ...queue, index: next });
+    } else {
+      setQueue(null);
+      toast('Invio in sequenza completato.');
+    }
   };
 
   const openSubmissionFile = async (value: string) => {
@@ -398,7 +433,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
             onEdit={person => setDialog({ kind: 'person', person })} onAdd={() => setDialog({ kind: 'person' })}
             onDelete={person => setDialog({ kind: 'delete-person', person })} onWhatsApp={sendWhatsApp}
             onImportDocument={() => documentInput.current?.click()}
-            importing={busy.document} />
+            importing={busy.document} onSendAll={startQueue} />
         )}
         {tab === 'SIGNED' && (
           <Responses people={delivered}
@@ -427,7 +462,14 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
         ))}
       </nav>
 
-      {tab === 'PEOPLE' && (
+      {queue && (
+        <SequenceBar queue={queue}
+          onSend={person => { sendWhatsApp(person); advanceQueue(); }}
+          onSkip={advanceQueue}
+          onClose={() => setQueue(null)} />
+      )}
+
+      {tab === 'PEOPLE' && !queue && (
         <button type="button" aria-label="Aggiungi persona" onClick={() => setDialog({ kind: 'person' })}
           className="fixed bottom-20 right-4 z-30 inline-flex h-14 w-14 items-center justify-center rounded-[3px] bg-ink text-paper shadow-lg lg:hidden">
           <Plus className="h-6 w-6" />
