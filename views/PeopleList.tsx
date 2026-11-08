@@ -88,8 +88,8 @@ const PeopleList: React.FC<Props> = ({ mode, people, onEdit, onAdd, onDelete, on
           <div className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0" role="group" aria-label="Filtra per stato">
             {filters.map(f => (
               <button key={f.id} type="button" onClick={() => setFilter(f.id)} aria-pressed={filter === f.id}
-                className={`flex min-h-9 shrink-0 items-center gap-2 px-3 text-sm transition-colors ${filter === f.id ? 'bg-ink text-paper' : 'bg-strip-white text-ink hover:bg-paper-deep'}`}>
-                {f.id !== 'all' && <span aria-hidden className={`h-2.5 w-2.5 ${STATUS_META[f.id].band}`} />}
+                className={`flex min-h-9 shrink-0 items-center gap-2 rounded-[3px] border px-3 text-sm transition-colors ${filter === f.id ? 'border-ink bg-ink text-paper' : 'border-line bg-card text-ink hover:border-ink/40'}`}>
+                {f.id !== 'all' && <span aria-hidden className={`h-2.5 w-2.5 rounded-full ${STATUS_META[f.id].band}`} />}
                 {f.label}
                 <span className="tabular font-mono text-xs opacity-70">{f.id === 'all' ? scoped.length : counts[f.id]}</span>
               </button>

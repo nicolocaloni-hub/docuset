@@ -47,7 +47,7 @@ const Responses: React.FC<Props> = ({ people, onImportCsv, importing, onGenerate
             const isOpen = expanded === p.id;
             return (
               <div key={p.id}>
-                <Strip band="bg-strip-green" onClick={() => setExpanded(isOpen ? null : p.id)}>
+                <Strip band="bg-st-delivered" onClick={() => setExpanded(isOpen ? null : p.id)}>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{p.name}</p>
                     <p className="truncate text-sm text-ink-soft">{p.role}</p>
@@ -62,7 +62,7 @@ const Responses: React.FC<Props> = ({ people, onImportCsv, importing, onGenerate
                 </Strip>
 
                 {isOpen && (
-                  <div className="animate-enter bg-paper px-4 py-4 sm:px-6">
+                  <div className="animate-enter -mt-1 rounded-b-[3px] border-t border-dashed border-line bg-card px-4 py-4 sm:px-6">
                     {!fields ? (
                       <p className="text-sm text-ink-soft">Nessun dato importato per questa persona.</p>
                     ) : (
@@ -73,7 +73,7 @@ const Responses: React.FC<Props> = ({ people, onImportCsv, importing, onGenerate
                           const fileUrl = extractCsvFileUrl(text);
                           const isSignature = /firma|signature/i.test(key) || text.includes('storage.tally.so');
                           return (
-                            <div key={key} className="min-w-0 border-l-2 border-ink/15 pl-3">
+                            <div key={key} className="min-w-0 border-l-2 border-manila/50 pl-3">
                               <dt className="text-xs text-ink-soft">{key}</dt>
                               <dd className="mt-0.5 break-words text-sm">
                                 {isSignature && fileUrl

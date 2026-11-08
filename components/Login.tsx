@@ -28,19 +28,17 @@ const Login: React.FC = () => {
 
   return (
     <div className="flex min-h-dvh flex-col bg-paper">
-      <div className="flex flex-col gap-1 bg-paper-deep p-1" aria-hidden>
-        <span className="h-3 bg-strip-yellow" />
-        <span className="h-3 bg-strip-blue" />
-        <span className="h-3 bg-strip-green" />
+      <div className="flex gap-2 border-b border-line bg-paper-deep px-6 pt-4" aria-hidden>
+        {['bg-manila', 'bg-st-delivered', 'bg-st-solicited'].map(color => <span key={color} className={`h-2 w-14 rounded-t-[3px] ${color}`} />)}
       </div>
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 py-12">
         <p className="font-mono text-xs uppercase tracking-widest text-ink-soft">SmartSet</p>
-        <h1 className="font-display text-7xl font-extrabold leading-[0.84]">DocuSet</h1>
+        <h1 className="font-display text-6xl leading-none">DocuSet</h1>
         <p className="mt-4 text-ink-soft">Documenti di cast e troupe, in un posto solo. Accedi con la tua email: ti mandiamo un link.</p>
 
         {state === 'sent' ? (
-          <div className="mt-8 flex gap-3 bg-strip-white p-4">
-            <Mail className="mt-0.5 h-5 w-5 shrink-0 text-strip-blue" />
+          <div className="mt-8 flex gap-3 rounded-[3px] bg-card p-4">
+            <Mail className="mt-0.5 h-5 w-5 shrink-0 text-manila-ink" />
             <p className="text-sm">Link inviato a <strong>{email}</strong>. Aprilo da questo dispositivo per entrare.</p>
           </div>
         ) : (

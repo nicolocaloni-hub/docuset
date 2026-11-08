@@ -1,20 +1,24 @@
 @import "tailwindcss";
 
-/* Token presi dal design system SmartSet (repo smartset.it, DESIGN.md). */
+/* "Cartella documenti": faldoni, fogli avorio, linguette e timbri. */
 @theme {
-  --color-paper: #F4F1EA;
-  --color-paper-deep: #E9E3D6;
-  --color-ink: #1C1C1C;
-  --color-ink-soft: #4A4740;
-  --color-strip-white: #FFFFFF;
-  --color-strip-yellow: #F7D44C;
-  --color-strip-blue: #3B5BA9;
-  --color-strip-green: #3F7A45;
-  --color-strip-salmon: #F2A99A;
-  --color-strip-beige: #E2DACA;
-  --color-cue: #B62A23;
+  --color-paper: #F3EEE3;
+  --color-paper-deep: #E8DFC9;
+  --color-card: #FFFCF5;
+  --color-line: #D6CBB2;
+  --color-ink: #2A251D;
+  --color-ink-soft: #6E6555;
+  --color-manila: #C9A35B;
+  --color-manila-ink: #8A6420;
+  --color-cue: #B3412F;
 
-  --font-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+  /* Stati di consegna: colore del timbro e della linguetta. */
+  --color-st-delivered: #2F6B3A;
+  --color-st-sent: #A0741F;
+  --color-st-solicited: #B3412F;
+  --color-st-todo: #8A8172;
+
+  --font-display: "Fraunces", Georgia, serif;
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
@@ -34,18 +38,25 @@ body {
 }
 
 ::selection {
-  background: var(--color-strip-yellow);
+  background: var(--color-manila);
   color: var(--color-ink);
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-strip-blue);
+  outline: 2px solid var(--color-manila-ink);
   outline-offset: 2px;
 }
 
 .font-display {
-  text-transform: uppercase;
-  letter-spacing: 0.005em;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-optical-sizing: auto;
+}
+
+/* Timbro: stato scritto a inchiostro, leggermente storto. */
+.stamp {
+  border: 1.5px solid currentColor;
+  transform: rotate(-3deg);
 }
 
 .tabular {

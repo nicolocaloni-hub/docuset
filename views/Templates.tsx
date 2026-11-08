@@ -24,7 +24,7 @@ const Templates: React.FC<Props> = ({ templates, uploading, onUpload, onOpen, on
     ) : (
       <Board>
         {templates.map(t => (
-          <Strip key={t.id} band="bg-strip-blue">
+          <Strip key={t.id} band="bg-manila-ink">
             <div className="min-w-0 flex-1">
               <p className="truncate font-medium">{t.name}</p>
               <p className="text-sm text-ink-soft">

@@ -161,9 +161,9 @@ export const ImportReviewModal: React.FC<{
       footer={<><Button variant="ghost" onClick={onClose}>Annulla</Button>
         <Button onClick={() => onConfirm(valid)} disabled={!valid.length}>Aggiungi {valid.length} persone</Button></>}>
       <p className="mb-4 text-sm text-ink-soft">Correggi qui nomi, ruoli e numeri prima di aggiungerli. Le righe senza nome vengono saltate.</p>
-      <div className="flex flex-col gap-1 bg-paper-deep p-1">
+      <div className="flex flex-col gap-2">
         {rows.map(r => (
-          <div key={r.id} className="grid grid-cols-[1fr_auto] gap-2 bg-strip-white p-2 sm:grid-cols-[2fr_1.5fr_1.5fr_auto]">
+          <div key={r.id} className="grid grid-cols-[1fr_auto] gap-2 rounded-[3px] bg-card p-2 shadow-[0_1px_0_var(--color-line)] sm:grid-cols-[2fr_1.5fr_1.5fr_auto]">
             <Input aria-label="Nome" value={r.name} onChange={e => update(r.id, 'name', e.target.value)} />
             <IconButton label={`Togli ${r.name || 'riga'}`} tone="danger" className="sm:order-last" onClick={() => setRows(list => list.filter(x => x.id !== r.id))}>
               <Trash2 className="h-4 w-4" />

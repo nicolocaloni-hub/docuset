@@ -275,7 +275,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
     </select>
   );
 
-  const syncDot = status === 'error' || status === 'conflict' ? 'bg-cue' : status === 'saving' ? 'bg-strip-yellow' : 'bg-strip-green';
+  const syncDot = status === 'error' || status === 'conflict' ? 'bg-cue' : status === 'saving' ? 'bg-st-sent' : 'bg-st-delivered';
 
   return (
     <div className="min-h-dvh lg:pl-64">
@@ -284,49 +284,49 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       <input ref={templateInput} type="file" accept="application/pdf,.pdf" hidden onChange={uploadTemplate} />
 
       {/* Sidebar desktop */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-ink text-paper lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-line bg-paper-deep text-ink lg:flex">
         <div className="px-5 pb-4 pt-6">
-          <p className="font-mono text-[11px] uppercase tracking-widest text-paper/50">SmartSet</p>
-          <p className="font-display text-4xl font-extrabold leading-none">DocuSet</p>
+          <p className="font-mono text-[11px] uppercase tracking-widest text-ink-soft">SmartSet</p>
+          <p className="font-display text-3xl leading-none">DocuSet</p>
         </div>
         <div className="px-3">
-          {productionSwitcher('w-full min-h-11 cursor-pointer border border-paper/20 bg-ink px-3 text-sm text-paper outline-none hover:border-paper/50')}
+          {productionSwitcher('w-full min-h-11 cursor-pointer rounded-[3px] border border-line bg-card px-3 text-sm text-ink outline-none hover:border-ink/40')}
         </div>
         <nav className="mt-6 flex flex-col gap-px px-3" aria-label="Sezioni">
           {NAV.map(item => (
             <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}
-              className={`flex min-h-11 items-center gap-3 px-3 text-left text-sm transition-colors ${tab === item.id ? 'bg-strip-yellow text-ink' : 'text-paper/75 hover:bg-paper/10 hover:text-paper'}`}>
+              className={`flex min-h-11 items-center gap-3 rounded-[3px] px-3 text-left text-sm transition-colors ${tab === item.id ? 'bg-manila text-ink font-medium' : 'text-ink-soft hover:bg-ink/5 hover:text-ink'}`}>
               <item.icon className="h-4 w-4" />
               <span className="flex-1">{item.label}</span>
               {item.id === 'REQUESTS' && pendingCount > 0 && <span className="tabular font-mono text-xs">{pendingCount}</span>}
             </button>
           ))}
         </nav>
-        <div className="mt-auto border-t border-paper/10 p-3">
+        <div className="mt-auto border-t border-line p-3">
           <button type="button" onClick={() => setDialog({ kind: 'settings' })}
-            className="flex min-h-11 w-full items-center gap-3 px-3 text-sm text-paper/75 hover:bg-paper/10 hover:text-paper">
+            className="flex min-h-11 w-full items-center gap-3 rounded-[3px] px-3 text-sm text-ink-soft hover:bg-ink/5 hover:text-ink">
             <Settings className="h-4 w-4" /> Impostazioni
           </button>
-          <p className="flex items-center gap-2 px-3 pt-2 text-xs text-paper/50" role="status">
-            <span aria-hidden className={`h-2 w-2 ${syncDot}`} /> {SYNC_LABEL[status]}
+          <p className="flex items-center gap-2 px-3 pt-2 text-xs text-ink-soft" role="status">
+            <span aria-hidden className={`h-2 w-2 rounded-full ${syncDot}`} /> {SYNC_LABEL[status]}
           </p>
         </div>
       </aside>
 
       {/* Barra superiore telefono */}
-      <header className="sticky top-0 z-30 flex items-center gap-2 bg-ink px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] text-paper lg:hidden">
-        <p className="font-display text-2xl font-extrabold leading-none">DocuSet</p>
-        <span aria-hidden className={`h-2 w-2 ${syncDot}`} title={SYNC_LABEL[status]} />
+      <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-line bg-paper-deep px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] text-ink lg:hidden">
+        <p className="font-display text-2xl leading-none">DocuSet</p>
+        <span aria-hidden className={`h-2 w-2 rounded-full ${syncDot}`} title={SYNC_LABEL[status]} />
         <div className="ml-auto min-w-0 max-w-[55%]">
-          {productionSwitcher('w-full min-h-10 truncate border border-paper/20 bg-ink px-2 text-sm text-paper outline-none')}
+          {productionSwitcher('w-full min-h-10 truncate rounded-[3px] border border-line bg-card px-2 text-sm text-ink outline-none')}
         </div>
-        <button type="button" aria-label="Impostazioni" onClick={() => setDialog({ kind: 'settings' })} className="inline-flex h-10 w-10 items-center justify-center text-paper/80">
+        <button type="button" aria-label="Impostazioni" onClick={() => setDialog({ kind: 'settings' })} className="inline-flex h-10 w-10 items-center justify-center text-ink-soft">
           <Settings className="h-5 w-5" />
         </button>
       </header>
 
       {status === 'conflict' && (
-        <div className="flex flex-wrap items-center gap-3 bg-cue px-4 py-3 text-sm text-strip-white lg:px-10">
+        <div className="flex flex-wrap items-center gap-3 bg-cue px-4 py-3 text-sm text-card lg:px-10">
           <span className="flex-1">I dati sono stati modificati da un altro dispositivo. Ricarica per vedere la versione aggiornata: le ultime modifiche fatte qui andranno perse.</span>
           <Button variant="secondary" onClick={reload}>Ricarica</Button>
         </div>
@@ -361,11 +361,11 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
         {NAV.map(item => (
           <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}
             className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] ${tab === item.id ? 'text-ink' : 'text-ink-soft'}`}>
-            {tab === item.id && <span aria-hidden className="absolute inset-x-3 top-0 h-1 bg-strip-yellow" />}
+            {tab === item.id && <span aria-hidden className="absolute inset-x-3 top-0 h-1 bg-manila" />}
             <item.icon className="h-5 w-5" />
             {item.short}
             {item.id === 'REQUESTS' && pendingCount > 0 && (
-              <span className="tabular absolute right-[18%] top-1.5 min-w-4 bg-strip-salmon px-1 font-mono text-[10px] leading-4 text-ink">{pendingCount}</span>
+              <span className="tabular absolute right-[18%] top-1.5 min-w-4 rounded-[3px] bg-st-solicited px-1 font-mono text-[10px] leading-4 text-card">{pendingCount}</span>
             )}
           </button>
         ))}
@@ -373,7 +373,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
 
       {tab === 'PEOPLE' && (
         <button type="button" aria-label="Aggiungi persona" onClick={() => setDialog({ kind: 'person' })}
-          className="fixed bottom-20 right-4 z-30 inline-flex h-14 w-14 items-center justify-center bg-ink text-paper shadow-lg lg:hidden">
+          className="fixed bottom-20 right-4 z-30 inline-flex h-14 w-14 items-center justify-center rounded-[3px] bg-ink text-paper shadow-lg lg:hidden">
           <Plus className="h-6 w-6" />
         </button>
       )}

@@ -47,7 +47,7 @@ const Dashboard: React.FC<Props> = ({
       <PageHeader title="Situazione" text={`Lo stato dei documenti per ${production.title}.`} />
 
       {!production.formLink && (
-        <div className="mb-6 flex flex-col gap-3 bg-strip-yellow p-4 sm:flex-row sm:items-center">
+        <div className="mb-6 flex flex-col gap-3 border border-manila bg-card p-4 rounded-[3px] sm:flex-row sm:items-center">
           <Link2 className="h-5 w-5 shrink-0" />
           <p className="flex-1 text-sm">Manca il link del modulo Tally: senza, i messaggi WhatsApp non possono partire.</p>
           <Button onClick={onOpenSettings}>Imposta il link</Button>
@@ -65,18 +65,18 @@ const Dashboard: React.FC<Props> = ({
         />
       ) : (
         <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
-          <div className="bg-strip-white p-5">
+          <div className="rounded-[3px] bg-card p-5 shadow-[0_1px_0_var(--color-line),0_2px_6px_rgba(42,37,29,0.06)]">
             <div className="flex items-end justify-between gap-4">
               <div>
                 <p className="text-sm text-ink-soft">Moduli consegnati</p>
-                <p className="tabular font-display text-6xl font-extrabold leading-none">
+                <p className="tabular font-display text-6xl leading-none">
                   {counts.delivered}<span className="text-ink-soft">/{total}</span>
                 </p>
               </div>
               <p className="tabular font-mono text-sm text-ink-soft">{percent}%</p>
             </div>
 
-            <div className="mt-5 flex h-4 gap-px bg-paper-deep" role="img"
+            <div className="mt-5 flex h-4 gap-px overflow-hidden rounded-[3px] bg-paper-deep" role="img"
               aria-label={ORDER.map(s => `${STATUS_META[s].label}: ${counts[s]}`).join(', ')}>
               {ORDER.filter(s => counts[s] > 0).map(s => (
                 <span key={s} className={STATUS_META[s].band} style={{ width: `${(counts[s] / total) * 100}%` }} />
@@ -86,14 +86,14 @@ const Dashboard: React.FC<Props> = ({
             <ul className="mt-5 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
               {ORDER.map(s => (
                 <li key={s} className="flex items-center gap-2 text-sm">
-                  <span aria-hidden className={`h-3 w-3 shrink-0 ${STATUS_META[s].band}`} />
+                  <span aria-hidden className={`h-3 w-3 shrink-0 rounded-full ${STATUS_META[s].band}`} />
                   <span className="text-ink-soft">{STATUS_META[s].label}</span>
                   <span className="tabular ml-auto font-mono">{counts[s]}</span>
                 </li>
               ))}
             </ul>
 
-            <div className="mt-6 flex flex-wrap gap-2 border-t border-ink/10 pt-4">
+            <div className="mt-6 flex flex-wrap gap-2 border-t border-line pt-4">
               <Button variant="secondary" onClick={onOpenPeople} icon={<ArrowRight className="h-4 w-4" />}>Cast & Crew</Button>
               <Button variant="ghost" onClick={onOpenTemplates}>{templatesCount} template</Button>
             </div>
@@ -107,7 +107,7 @@ const Dashboard: React.FC<Props> = ({
               )}
             </div>
             {toChase.length === 0 ? (
-              <p className="bg-strip-white p-4 text-sm text-ink-soft">
+              <p className="rounded-[3px] bg-card p-4 text-sm text-ink-soft">
                 {counts.todo > 0 ? `${counts.todo} persone non hanno ancora ricevuto il modulo.` : 'Nessuno da sollecitare.'}
               </p>
             ) : (
