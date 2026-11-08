@@ -1,4 +1,3 @@
-import { extractCsvFileUrl, normalizeCsvHeader } from './tallyCsv';
 
 export interface PdfTemplateTextItem {
   text: string;
@@ -125,7 +124,15 @@ const SIGNATURE_ALIASES = [
   'signature',
 ];
 
-const normalizeAlias = (value: string) => normalizeCsvHeader(value);
+const normalizeAlias = (value: string) => value
+  .replace(/^\uFEFF/, '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[_-]+/g, ' ')
+  .replace(/[^a-z0-9 ]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
 const compact = (value: string) => normalizeAlias(value).replace(/\s/g, '');
 const toUint8Array = (source: ArrayBuffer | Uint8Array) => Uint8Array.from(
   source instanceof Uint8Array ? source : new Uint8Array(source)
@@ -137,8 +144,7 @@ const uniqueAliases = (values: string[]) => [...new Set(values.map(normalizeAlia
 const isSignatureField = (key: string, value: string) => {
   const normalizedKey = normalizeAlias(key);
   return normalizedKey.includes('firma')
-    || normalizedKey.includes('signature')
-    || value.includes('storage.tally.so');
+    || normalizedKey.includes('signature');
 };
 
 const matchesAlias = (left: string, right: string) => {
@@ -199,7 +205,8 @@ export const getPdfSignatureSource = (formData: Record<string, unknown>): string
   for (const [key, rawValue] of Object.entries(formData)) {
     const value = toDisplayValue(rawValue);
     if (!value || !isSignatureField(key, value)) continue;
-    const source = extractCsvFileUrl(value);
+    // La firma arriva come link firmato (https) o immagine inline.
+    const source = /^(https?:\/\/\S+|data:image\/[a-z0-9.+-]+;base64,)/i.test(value) ? value : '';
     if (source) return source;
   }
   return '';
@@ -481,7 +488,7 @@ export const fillPdfTemplateAutomatically = async (
       try {
         signatureImage = await pdfDoc.embedJpg(bytes);
       } catch {
-        throw new Error('La firma nel CSV non è un’immagine PNG o JPG valida.');
+        throw new Error('La firma non è un’immagine PNG o JPG valida.');
       }
     }
   }

@@ -19,7 +19,7 @@ const Templates: React.FC<Props> = ({ templates, uploading, onUpload, onOpen, on
       actions={<Button onClick={onUpload} disabled={uploading} icon={<FilePlus className="h-4 w-4" />}>{uploading ? 'Caricamento…' : 'Carica PDF'}</Button>}
     />
     {templates.length === 0 ? (
-      <EmptyState title="Nessun template" text="Carica un PDF: DocuSet riconosce i campi e li compila con le risposte di Tally."
+      <EmptyState title="Nessun template" text="Carica un PDF: DocuSet riconosce i campi e li compila con le risposte del modulo."
         action={<Button onClick={onUpload} icon={<FilePlus className="h-4 w-4" />}>Carica PDF</Button>} />
     ) : (
       <Board>

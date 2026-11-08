@@ -61,17 +61,15 @@ export const SettingsModal: React.FC<{
   accountEmail: string | null;
   /** Modulo DocuSet disponibile (Supabase collegato e accesso fatto). */
   formsEnabled: boolean;
-  onSave: (patch: Pick<Production, 'title' | 'formLink' | 'formMode' | 'formFields' | 'whatsappMessageTemplate' | 'whatsappSolicitTemplate'>) => void;
+  onSave: (patch: Pick<Production, 'title' | 'formFields' | 'whatsappMessageTemplate' | 'whatsappSolicitTemplate'>) => void;
   onDeleteProduction: () => void;
   onRestore: (state: AppState) => void;
   onSignOut?: () => void;
   onClose: () => void;
 }> = ({ production, data, accountEmail, formsEnabled, onSave, onDeleteProduction, onRestore, onSignOut, onClose }) => {
   const [title, setTitle] = useState(production.title);
-  const [mode, setMode] = useState<'docuset' | 'tally'>(formsEnabled && production.formMode !== 'tally' ? 'docuset' : 'tally');
   const [fields, setFields] = useState<FormField[]>(productionFields(production));
   const [customLabel, setCustomLabel] = useState('');
-  const [formLink, setFormLink] = useState(production.formLink || '');
   const [invite, setInvite] = useState(production.whatsappMessageTemplate || DEFAULT_INVITE_TEMPLATE);
   const [solicit, setSolicit] = useState(production.whatsappSolicitTemplate || DEFAULT_SOLICIT_TEMPLATE);
   const [restoreError, setRestoreError] = useState<string | null>(null);
@@ -79,8 +77,7 @@ export const SettingsModal: React.FC<{
 
   const inviteMissing = missingVariables(invite);
   const solicitMissing = missingVariables(solicit);
-  const linkInvalid = formLink.trim() !== '' && !/^https:\/\//.test(formLink.trim());
-  const canSave = title.trim() && !inviteMissing.length && !solicitMissing.length && !linkInvalid && (mode === 'tally' || fields.length > 0);
+  const canSave = title.trim() && !inviteMissing.length && !solicitMissing.length && fields.length > 0;
 
   // I campi predefiniti restano nel loro ordine; quelli aggiunti a mano vanno in fondo.
   const togglePreset = (preset: FormField, on: boolean) => setFields(list => on
@@ -126,26 +123,14 @@ export const SettingsModal: React.FC<{
   return (
     <Modal title="Impostazioni" onClose={onClose} wide
       footer={<><Button variant="ghost" onClick={onClose}>Annulla</Button>
-        <Button disabled={!canSave} onClick={() => onSave({ title: title.trim(), formLink: formLink.trim(), formMode: mode, formFields: fields, whatsappMessageTemplate: invite, whatsappSolicitTemplate: solicit })}>Salva</Button></>}>
+        <Button disabled={!canSave} onClick={() => onSave({ title: title.trim(), formFields: fields, whatsappMessageTemplate: invite, whatsappSolicitTemplate: solicit })}>Salva</Button></>}>
       <div className="space-y-5">
         <Field label="Titolo della produzione"><Input value={title} onChange={e => setTitle(e.target.value)} /></Field>
-        <fieldset>
-          <legend className="mb-1.5 text-sm font-medium">Modulo per cast e troupe</legend>
-          {formsEnabled ? (
-            <div className="grid grid-cols-2 gap-1 rounded-[3px] bg-paper-deep p-1" role="radiogroup">
-              {([['docuset', 'Modulo DocuSet'], ['tally', 'Tally']] as const).map(([value, label]) => (
-                <button key={value} type="button" role="radio" aria-checked={mode === value} onClick={() => setMode(value)}
-                  className={`min-h-10 rounded-[3px] text-sm transition-colors ${mode === value ? 'bg-card font-medium shadow-[0_1px_0_var(--color-line)]' : 'text-ink-soft hover:text-ink'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-ink-soft">Il modulo DocuSet (senza Tally, con firma) si attiva collegando Supabase. Intanto puoi usare un modulo Tally.</p>
+        <div>
+          <p className="mb-1.5 text-sm font-medium">Modulo per cast e troupe</p>
+          {!formsEnabled && (
+            <p className="mb-2 rounded-[3px] bg-paper-deep p-3 text-sm text-ink-soft">Sei in modalità locale: i campi si salvano, ma i link al modulo partono solo dopo l'accesso online.</p>
           )}
-        </fieldset>
-
-        {mode === 'docuset' ? (
           <div>
             <p className="mb-2 text-sm text-ink-soft">Ogni persona riceve un link personale. Scegli cosa chiedere:</p>
             <ul className="divide-y divide-line rounded-[3px] border border-line bg-card">
@@ -186,11 +171,7 @@ export const SettingsModal: React.FC<{
               <Button variant="secondary" onClick={addCustom} disabled={!customLabel.trim()} icon={<Plus className="h-4 w-4" />}>Aggiungi</Button>
             </div>
           </div>
-        ) : (
-          <Field label="Link del modulo Tally" hint={linkInvalid ? <span className="text-cue">Deve iniziare con https://</span> : 'A ogni persona arriva il link con pid e mid, così la risposta torna a lei.'}>
-            <Input value={formLink} onChange={e => setFormLink(e.target.value)} placeholder="https://tally.so/r/XXXXXX" inputMode="url" />
-          </Field>
-        )}
+        </div>
         <Field label="Messaggio WhatsApp: invio" hint={variablesHint(inviteMissing)}>
           <textarea value={invite} onChange={e => setInvite(e.target.value)} rows={5} className={inputClass} />
         </Field>

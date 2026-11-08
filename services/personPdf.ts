@@ -7,7 +7,7 @@ const fetchSignature = async (source: string) => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.arrayBuffer();
   } catch {
-    throw new Error('Non riesco a scaricare la firma indicata nel CSV. Verifica che il collegamento Tally sia ancora valido.');
+    throw new Error('Non riesco a scaricare la firma. Riprova tra poco.');
   }
 };
 
@@ -40,7 +40,7 @@ const fillMappedFields = async (template: Template, pdfBytes: ArrayBuffer, formD
   return pdfDoc.save();
 };
 
-/** PDF del template compilato con le risposte Tally di una persona. */
+/** PDF del template compilato con le risposte al modulo di una persona. */
 export const buildPersonPdf = async (template: Template, pdfBytes: ArrayBuffer, formData: Record<string, unknown>) => {
   const source = getPdfSignatureSource(formData);
   // Come prima: con campi mappati una firma irraggiungibile non blocca il PDF.

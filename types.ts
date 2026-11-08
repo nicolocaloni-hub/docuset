@@ -47,7 +47,7 @@ export interface Person {
   hubToken: string;
   fieldsJSON?: string;
   removedAt?: string;
-  deliveredAt?: string; // Data di consegna dal form Tally
+  deliveredAt?: string; // Data di consegna del modulo
   sentAt?: string; // Data di invio link WhatsApp
   solicitedAt?: string; // Data di sollecito WhatsApp
 }
@@ -66,10 +66,7 @@ export interface Production {
   createdAt: string;
   notes?: string;
   producerPhone?: string;
-  /** 'docuset' = modulo interno (serve Supabase); 'tally' = link esterno in `formLink`. */
-  formMode?: 'docuset' | 'tally';
   formFields?: FormField[];
-  formLink?: string;
   whatsappMessageTemplate?: string;
   whatsappSolicitTemplate?: string;
 }
