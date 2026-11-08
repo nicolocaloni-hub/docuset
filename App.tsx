@@ -15,6 +15,8 @@ import Login from './components/Login';
 import SequenceBar, { type SendQueue } from './components/SequenceBar';
 import Tour, { TOUR_DONE_KEY } from './components/Tour';
 import InstallPrompt from './components/InstallPrompt';
+import ProfileSetup from './components/ProfileSetup';
+import AdminPanel from './views/Admin';
 import PublicForm from './views/PublicForm';
 import Dashboard from './views/Dashboard';
 import PeopleList from './views/PeopleList';
@@ -65,6 +67,11 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
   const [refreshing, setRefreshing] = useState(false);
   const [queue, setQueue] = useState<SendQueue | null>(null);
   // La guida parte da sola solo la prima volta; poi si riapre dalle Impostazioni.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  useEffect(() => {
+    if (supabase && userId) supabase.rpc('is_admin').then(({ data: admin }) => setIsAdmin(admin === true));
+  }, [userId]);
   const [tourOpen, setTourOpen] = useState(() => {
     try { return !localStorage.getItem(TOUR_DONE_KEY); } catch { return false; }
   });
@@ -470,6 +477,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       </nav>
 
       {tourOpen && <Tour onClose={() => setTourOpen(false)} />}
+      {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
       <InstallPrompt hidden={tourOpen || Boolean(queue) || dialog !== null} />
 
       {queue && (
@@ -497,6 +505,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
           onDeleteProduction={() => setDialog({ kind: 'delete-production' })}
           onRestore={restoreBackup}
           onRestartTour={() => { setDialog(null); setTab('DASHBOARD'); setTourOpen(true); }}
+          onOpenAdmin={isAdmin ? () => { setDialog(null); setAdminOpen(true); } : undefined}
           onSignOut={supabase && userId ? () => { supabase?.auth.signOut(); } : undefined} />
       )}
       {dialog?.kind === 'import' && (
@@ -554,12 +563,24 @@ const AuthenticatedApp: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
+  // undefined = in verifica, null = da chiedere. Se la tabella non risponde non blocchiamo l'app.
+  const [profileName, setProfileName] = useState<string | null | undefined>(undefined);
+  const userId = session?.user.id;
+  useEffect(() => {
+    if (!supabase || !userId) return;
+    setProfileName(undefined);
+    supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle()
+      .then(({ data, error }) => setProfileName(error ? '' : data?.full_name ?? null));
+  }, [userId]);
+
   return (
     <ToastProvider>
-      {session === undefined ? (
+      {session === undefined || (session && profileName === undefined) ? (
         <div className="flex min-h-dvh items-center justify-center gap-3 text-ink-soft"><RefreshCw className="h-4 w-4 animate-spin" /> Caricamento…</div>
       ) : supabase && !session ? (
         <Login />
+      ) : session && profileName === null ? (
+        <ProfileSetup email={session.user.email ?? null} onDone={setProfileName} />
       ) : (
         <Workspace key={session?.user.id ?? 'local'} userId={session?.user.id ?? null} email={session?.user.email ?? null} />
       )}
