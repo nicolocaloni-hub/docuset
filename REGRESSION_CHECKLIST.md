@@ -44,3 +44,5 @@
 - [x] La risposta arriva da sola in Risposte (all'apertura, al ritorno sulla scheda, ogni minuto o con "Aggiorna").
 - [x] WhatsApp manda il link personale; firma e documento si aprono con link firmati; la firma finisce nel PDF.
 - [x] Eliminare persona o produzione cancella anche link, risposte e file del modulo.
+- [x] Le foto del documento vengono ridimensionate e compresse in JPEG prima del caricamento (PDF invariati).
+- [x] "Invia a tutti" / "Sollecita tutti": prepara i link, poi un tocco per persona con salto e interruzione.
