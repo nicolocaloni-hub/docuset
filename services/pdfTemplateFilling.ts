@@ -22,6 +22,8 @@ export interface PdfTemplatePlacement {
   top: number;
   fontSize: number;
   type: 'text' | 'signature';
+  /** Larghezza della riga `____` su cui scrivere, quando il valore va proprio lì. */
+  maxWidth?: number;
 }
 
 export interface FilledPdfResult {
@@ -116,6 +118,8 @@ const CANONICAL_FIELDS: CanonicalField[] = [
 
 const SIGNATURE_ALIASES = [
   'firma partecipante leggibile',
+  'firma del collaboratore',
+  'firma collaboratore',
   'firma del partecipante',
   'firma partecipante',
   'firma qui',
@@ -341,6 +345,43 @@ const bestLineMatch = (line: TextLine, aliases: string[]) => {
   return null;
 };
 
+/** Testo della riga con la x di ogni carattere, per sapere dove cade una `____`. */
+const lineChars = (line: TextLine) => {
+  let text = '';
+  let end = 0;
+  const xs: number[] = [];
+  // Gli spazi sono circa metà di una lettera: senza pesarli una `____` dopo molti spazi finirebbe troppo a sinistra.
+  const weight = (char: string) => (char === ' ' ? 0.5 : 1);
+  for (const item of line.items) {
+    const width = item.width || Math.max(item.text.length * Math.max(item.height, 10) * 0.48, 1);
+    const total = [...item.text].reduce((sum, char) => sum + weight(char), 0) || 1;
+    if (text) { text += ' '; xs.push(item.x); }
+    let done = 0;
+    for (const char of item.text) { xs.push(item.x + (width * done) / total); done += weight(char); }
+    text += item.text;
+    end = item.x + width;
+  }
+  xs.push(end); // una x per carattere, più la fine dell'ultimo
+  return { text, xAt: (index: number) => xs[Math.min(index, xs.length - 1)] ?? 0 };
+};
+
+interface Blank { start: number; end: number; parenthetical: string }
+
+/** Ogni riga `___` della linea, con l'eventuale dicitura tra parentesi subito dopo: «____ (nome e cognome)». */
+const blanksOf = (line: TextLine): Blank[] => {
+  const { text, xAt } = lineChars(line);
+  return [...text.matchAll(/_{3,}(?:\s*\(([^)]*)\))?/g)].map(match => {
+    const run = match[0].match(/^_+/)![0].length;
+    return { start: xAt(match.index!), end: xAt(match.index! + run), parenthetical: normalizeAlias(match[1] ?? '') };
+  });
+};
+
+const startsWithAlias = (phrase: string, aliases: string[]) =>
+  Boolean(phrase) && uniqueAliases(aliases).some(alias => phrase === alias || phrase.startsWith(`${alias} `));
+
+// Il valore appoggiato sulla riga, appena sopra la linea, alla misura del testo intorno.
+const onLineFontSize = (line: TextLine) => Math.max(MIN_FONT_SIZE, Math.min(28, (line.height || 10) * 0.9));
+
 export const detectPdfTemplatePlacements = (
   pages: PdfTemplatePage[],
   formData: Record<string, unknown>,
@@ -351,8 +392,55 @@ export const detectPdfTemplatePlacements = (
 
   pages.forEach((page, pageIndex) => {
     const lines = groupIntoLines(page.items);
+    // Prima le righe da riempire con la dicitura dopo: chi è già piazzato così non si ripete in questa pagina.
+    const placedOnBlank = new Set<string>();
+    const usedBlanks = new Set<string>();
+    const signatureLines = new Set<TextLine>();
+
+    lines.forEach((line, lineIndex) => {
+      blanksOf(line).forEach(blank => {
+        const field = fields.find(candidate => startsWithAlias(blank.parenthetical, candidate.aliases));
+        const isSignature = !field && hasSignature && startsWithAlias(blank.parenthetical, SIGNATURE_ALIASES);
+        if (!field && !isSignature) return;
+        usedBlanks.add(`${lineIndex}:${blank.start}`);
+        if (field) placedOnBlank.add(field.id);
+        else signatureLines.add(line);
+        placements.push({
+          page: pageIndex,
+          fieldId: field ? field.id : 'signature',
+          label: field ? field.label : 'Firma',
+          value: field ? formatPdfFieldValue(field.value, field.kind) : '',
+          x: blank.start + 2,
+          top: line.top - 2,
+          fontSize: field ? onLineFontSize(line) : 0,
+          type: field ? 'text' : 'signature',
+          maxWidth: blank.end - blank.start - 2,
+        });
+      });
+    });
+
+    // «(firma)» da sola sotto una riga: si firma sulla `____` libera più vicina della riga sopra.
+    if (hasSignature) {
+      lines.forEach((line, lineIndex) => {
+        const raw = lineChars(line).text.trim();
+        if (!/^\(.*\)$/.test(raw) || !startsWithAlias(normalizeAlias(raw), SIGNATURE_ALIASES)) return;
+        const above = lines[lineIndex - 1];
+        if (!above || line.top - above.top > Math.max(line.height, above.height) * 3) return;
+        const free = blanksOf(above).filter(blank => !usedBlanks.has(`${lineIndex - 1}:${blank.start}`));
+        const target = free.sort((a, b) => Math.abs(a.start - line.items[0].x) - Math.abs(b.start - line.items[0].x))[0];
+        if (!target) return;
+        usedBlanks.add(`${lineIndex - 1}:${target.start}`);
+        signatureLines.add(line);
+        placements.push({
+          page: pageIndex, fieldId: 'signature', label: 'Firma', value: '',
+          x: target.start + 2, top: above.top - 2, fontSize: 0, type: 'signature', maxWidth: target.end - target.start - 2,
+        });
+      });
+    }
+
     for (const line of lines) {
       for (const field of fields) {
+        if (placedOnBlank.has(field.id)) continue;
         const match = bestLineMatch(line, field.aliases);
         if (!match) continue;
         placements.push({
@@ -362,12 +450,12 @@ export const detectPdfTemplatePlacements = (
           value: formatPdfFieldValue(field.value, field.kind),
           x: match.endX + CM_HALF_IN_POINTS,
           top: line.top,
-          fontSize: Math.max(MIN_FONT_SIZE, Math.min(12, line.height || 10)),
+          fontSize: onLineFontSize(line),
           type: 'text',
         });
       }
 
-      if (hasSignature) {
+      if (hasSignature && !signatureLines.has(line)) {
         const signatureMatch = bestLineMatch(line, SIGNATURE_ALIASES);
         if (signatureMatch) {
           placements.push({
@@ -507,7 +595,8 @@ export const fillPdfTemplateAutomatically = async (
     if (placement.type === 'signature') {
       if (!signatureImage) continue;
       const naturalRatio = signatureImage.width / signatureImage.height || 3;
-      let signatureWidth = Math.min(150, width - x - PAGE_MARGIN);
+      const onLine = placement.maxWidth !== undefined;
+      let signatureWidth = Math.min(150, onLine ? Math.max(90, placement.maxWidth! * xScale) : width - x - PAGE_MARGIN);
       if (signatureWidth < 70) {
         x = PAGE_MARGIN;
         signatureWidth = Math.min(150, width - PAGE_MARGIN * 2);
@@ -515,7 +604,8 @@ export const fillPdfTemplateAutomatically = async (
       const signatureHeight = Math.min(52, signatureWidth / naturalRatio);
       page.drawImage(signatureImage, {
         x,
-        y: Math.max(PAGE_MARGIN, baselineY - signatureHeight * 0.55),
+        // Sulla riga la firma ci si appoggia sopra; accanto a un'etichetta resta centrata sulla linea del testo.
+        y: Math.max(PAGE_MARGIN, baselineY - signatureHeight * (onLine ? 0.2 : 0.55)),
         width: signatureWidth,
         height: signatureHeight,
       });
@@ -524,6 +614,13 @@ export const fillPdfTemplateAutomatically = async (
     }
 
     if (filledAcroFields > 0) continue;
+    if (placement.maxWidth !== undefined) {
+      // Sulla riga: rimpicciolisce fino a starci; se proprio non ci sta, sborda a destra invece di andare a capo.
+      const size = fitText(font, placement.value, placement.fontSize * yScale, placement.maxWidth * xScale);
+      page.drawText(placement.value, { x, y: Math.max(PAGE_MARGIN, baselineY), size, font });
+      filledLabels.add(placement.label);
+      continue;
+    }
     let maxWidth = width - x - PAGE_MARGIN;
     if (maxWidth < 70) {
       x = PAGE_MARGIN;
