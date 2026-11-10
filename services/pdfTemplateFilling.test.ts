@@ -58,6 +58,32 @@ test('trova etichette statiche, campi personalizzati e firma usando le coordinat
   assert.equal(placements.some(placement => placement.top === 260), false, 'il testo discorsivo non è un’etichetta');
 });
 
+test('scrive sulla riga quando la dicitura viene dopo: «____ (nome e cognome)» e «(firma)» sotto', () => {
+  const pages: PdfTemplatePage[] = [{
+    width: 595,
+    height: 842,
+    items: [
+      item('____________________', 40, 100, 200),
+      item('(nome e cognome), nato/a a', 245, 100, 150),
+      item('________________', 40, 125, 160),
+      item('(luogo di nascita) il', 205, 125, 110),
+      item('C.F. RSSMRA (codice fiscale) non è una riga', 40, 150, 230),
+      item('____________________', 40, 200, 200),
+      item('(nome e cognome)', 245, 200, 95),
+      item('____________________', 360, 200, 200),
+      item('(firma)', 40, 222, 35),
+    ],
+  }];
+
+  const placements = detectPdfTemplatePlacements(pages, { nome: 'Mario Rossi', luogoNascita: 'Roma', cf: 'RSSMRA00A01H501Z' }, true);
+  const at = (fieldId: string) => placements.filter(p => p.fieldId === fieldId).map(p => [Math.round(p.x), p.top + 2]);
+
+  assert.deepEqual(at('fullName'), [[42, 100], [42, 200]], 'il nome va all’inizio di ogni riga, una volta per riga');
+  assert.deepEqual(at('birthPlace'), [[42, 125]]);
+  assert.deepEqual(at('signature'), [[362, 200]], 'la firma va sulla riga libera sopra «(firma)», non su quella del nome');
+  assert.ok(placements.every(p => p.maxWidth === undefined || p.maxWidth > 100), 'il valore resta nella sua riga');
+});
+
 test('la firma va dopo "Firma del collaboratore", non sopra', () => {
   const pages: PdfTemplatePage[] = [{ width: 595, height: 842, items: [item('Firma del collaboratore', 260, 220, 115)] }];
   const [signature] = detectPdfTemplatePlacements(pages, {}, true);
