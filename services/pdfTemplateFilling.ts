@@ -116,6 +116,8 @@ const CANONICAL_FIELDS: CanonicalField[] = [
 
 const SIGNATURE_ALIASES = [
   'firma partecipante leggibile',
+  'firma del collaboratore',
+  'firma collaboratore',
   'firma del partecipante',
   'firma partecipante',
   'firma qui',

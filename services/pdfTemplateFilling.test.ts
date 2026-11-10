@@ -58,6 +58,13 @@ test('trova etichette statiche, campi personalizzati e firma usando le coordinat
   assert.equal(placements.some(placement => placement.top === 260), false, 'il testo discorsivo non è un’etichetta');
 });
 
+test('la firma va dopo "Firma del collaboratore", non sopra', () => {
+  const pages: PdfTemplatePage[] = [{ width: 595, height: 842, items: [item('Firma del collaboratore', 260, 220, 115)] }];
+  const [signature] = detectPdfTemplatePlacements(pages, {}, true);
+  assert.equal(signature?.fieldId, 'signature');
+  assert.ok(signature.x >= 260 + 115 - 1, 'la firma inizia dopo l’intera etichetta');
+});
+
 test('compila un PDF statico ed espone nel testo i valori inseriti', async () => {
   const sourceDoc = await PDFDocument.create();
   const page = sourceDoc.addPage([595, 842]);
