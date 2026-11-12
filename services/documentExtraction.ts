@@ -171,32 +171,45 @@ const linesInColumn = (
   && item.top < endTop
 )));
 
+/**
+ * Testo della cella che appartiene al numero in `anchorTop`: le righe della finestra
+ * (più vicine a questo numero che agli altri), anche sopra il numero, finché sono attaccate.
+ * Serve per le celle centrate in verticale: «Produttore / esecutivo» col numero sulla seconda riga.
+ */
 const collectAnchoredCell = (lines: TextLine[], anchorTop: number, windowStart: number, windowEnd: number) => {
-  const candidates = lines.filter(line => line.top >= windowStart && line.top < windowEnd);
+  const candidates = lines.filter(line => line.top > windowStart && line.top <= windowEnd);
   if (candidates.length === 0) return '';
 
-  let startIndex = 0;
-  let smallestDistance = Number.POSITIVE_INFINITY;
+  let nearest = 0;
   candidates.forEach((line, index) => {
-    const distance = Math.abs(line.top - anchorTop);
-    if (distance < smallestDistance) {
-      startIndex = index;
-      smallestDistance = distance;
-    }
+    if (Math.abs(line.top - anchorTop) < Math.abs(candidates[nearest].top - anchorTop)) nearest = index;
   });
+  if (Math.abs(candidates[nearest].top - anchorTop) > WRAPPED_LINE_GAP) return '';
 
-  if (smallestDistance > WRAPPED_LINE_GAP) return '';
+  let first = nearest;
+  while (first > 0 && candidates[first].top - candidates[first - 1].top <= WRAPPED_LINE_GAP) first -= 1;
+  let last = nearest;
+  while (last + 1 < candidates.length && candidates[last + 1].top - candidates[last].top <= WRAPPED_LINE_GAP) last += 1;
 
-  const selected = [lineText(candidates[startIndex])];
-  let previousTop = candidates[startIndex].top;
-  for (let index = startIndex + 1; index < candidates.length; index += 1) {
-    const line = candidates[index];
-    if (line.top - previousTop > WRAPPED_LINE_GAP) break;
-    selected.push(lineText(line));
-    previousTop = line.top;
+  return cleanFieldLines(candidates.slice(first, last + 1).map(lineText));
+};
+
+/** Titolo di reparto nella prima colonna: tutto maiuscolo, es. «PRODUZIONE», «POST PROD», «SCENEGG.». */
+const isDepartmentHeading = (value: string) => {
+  const text = collapseWhitespace(value);
+  return /^[A-ZÀ-Ý][A-ZÀ-Ý0-9 .'&/-]{2,}$/.test(text) && !isIgnoredName(text);
+};
+
+/** Una persona elencata in più reparti (stesso nome e numero) diventa una sola, con tutti i ruoli. */
+const mergeSamePerson = (members: ImportedCrewMember[]) => {
+  const merged = new Map<string, ImportedCrewMember>();
+  for (const member of members) {
+    const key = `${normalizeHeader(member.name)}|${digitsOnly(member.phone)}`;
+    const existing = merged.get(key);
+    if (!existing) { merged.set(key, { ...member }); continue; }
+    if (!existing.role.split(' / ').includes(member.role)) existing.role = `${existing.role} / ${member.role}`;
   }
-
-  return cleanFieldLines(selected);
+  return [...merged.values()];
 };
 
 const extractSegment = (
@@ -204,6 +217,8 @@ const extractSegment = (
   layout: ColumnLayout,
   startTop: number,
   endTop: number,
+  /** Reparto in corso dalla pagina o dal segmento prima. */
+  department: { current?: string },
 ): ImportedCrewMember[] => {
   const phoneLines = linesInColumn(page.items, layout.phoneMin, layout.phoneMax, startTop, endTop)
     .filter(line => digitsOnly(lineText(line)).length >= 4);
@@ -230,26 +245,50 @@ const extractSegment = (
 
   const nameLines = linesInColumn(page.items, layout.nameMin, layout.roleMin, startTop, endTop);
   const roleLines = linesInColumn(page.items, layout.roleMin, layout.phoneMin, startTop, endTop);
+  const headings = layout.departmentMin === undefined ? [] : linesInColumn(page.items, layout.departmentMin, layout.nameMin, startTop, endTop)
+    .filter(line => isDepartmentHeading(lineText(line)));
 
-  return anchors.flatMap((anchor, index) => {
+  // Confine tra due righe della tabella: lo spazio vuoto più grande tra i due numeri.
+  // Dentro una cella le righe sono più strette che tra una riga e l'altra; a pari spazio vince l'ultimo (celle allineate in alto).
+  // Solo nome e ruolo: il numero può avere un carattere diverso e stare un punto più su.
+  const textTops = groupIntoLines(page.items.filter(item => item.x >= layout.nameMin && item.x < layout.phoneMin)).map(line => line.top);
+  const boundary = (upper: number, lower: number) => {
+    const tops = textTops.filter(top => top >= upper - LINE_TOLERANCE && top <= lower + LINE_TOLERANCE);
+    if (tops.length < 2) return (upper + lower) / 2;
+    let cut = (upper + lower) / 2;
+    let widest = -1;
+    for (let i = 1; i < tops.length; i += 1) {
+      if (tops[i] - tops[i - 1] >= widest) { widest = tops[i] - tops[i - 1]; cut = (tops[i] + tops[i - 1]) / 2; }
+    }
+    return cut;
+  };
+
+  const members = anchors.flatMap((anchor, index) => {
     const previousAnchor = anchors[index - 1];
     const nextAnchor = anchors[index + 1];
-    const windowStart = previousAnchor ? (previousAnchor.top + anchor.top) / 2 : startTop;
-    const windowEnd = nextAnchor ? (anchor.top + nextAnchor.top) / 2 : endTop;
-    const name = collectAnchoredCell(nameLines, anchor.top, windowStart - LINE_TOLERANCE, windowEnd + LINE_TOLERANCE);
+    const windowStart = previousAnchor ? boundary(previousAnchor.top, anchor.top) : startTop - LINE_TOLERANCE;
+    const windowEnd = nextAnchor ? boundary(anchor.top, nextAnchor.top) : endTop + LINE_TOLERANCE;
+    const heading = headings.filter(line => line.top <= anchor.top + LINE_TOLERANCE).at(-1);
+    if (heading) department.current = lineText(heading);
+    const name = collectAnchoredCell(nameLines, anchor.top, windowStart, windowEnd);
     if (!name || isIgnoredName(name) || /\d/.test(name)) return [];
 
     return [{
       name,
-      role: collectAnchoredCell(roleLines, anchor.top, windowStart - LINE_TOLERANCE, windowEnd + LINE_TOLERANCE) || 'Crew',
+      role: collectAnchoredCell(roleLines, anchor.top, windowStart, windowEnd) || 'Crew',
       phone: anchor.phone,
+      ...(department.current ? { department: department.current } : {}),
     }];
   });
+  // Un titolo in fondo alla pagina vale per le righe della pagina dopo.
+  if (headings.length) department.current = lineText(headings.at(-1)!);
+  return members;
 };
 
 export const parsePositionedPdfPages = (pages: PositionedPage[]): ImportedCrewMember[] => {
   const members: ImportedCrewMember[] = [];
   let activeLayout: ColumnLayout | null = null;
+  const department: { current?: string } = {};
 
   for (const page of pages) {
     const lines = groupIntoLines(page.items);
@@ -260,18 +299,18 @@ export const parsePositionedPdfPages = (pages: PositionedPage[]): ImportedCrewMe
     let segmentStart = 0;
     for (const header of headers) {
       if (activeLayout && header.line.top > segmentStart) {
-        members.push(...extractSegment(page, activeLayout, segmentStart, header.line.top - LINE_TOLERANCE));
+        members.push(...extractSegment(page, activeLayout, segmentStart, header.line.top - LINE_TOLERANCE, department));
       }
       activeLayout = header.layout;
       segmentStart = header.line.top + header.line.height + LINE_TOLERANCE;
     }
 
     if (activeLayout) {
-      members.push(...extractSegment(page, activeLayout, segmentStart, page.height + 1));
+      members.push(...extractSegment(page, activeLayout, segmentStart, page.height + 1, department));
     }
   }
 
-  return members;
+  return mergeSamePerson(members);
 };
 
 const loadPdfJs = async () => {
@@ -356,7 +395,7 @@ export const parseCrewTables = (tables: string[][][]): ImportedCrewMember[] => {
     }
   }
 
-  return members;
+  return mergeSamePerson(members);
 };
 
 export const extractCrewMembersFromDocx = async (source: ArrayBuffer) => {
