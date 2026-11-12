@@ -310,8 +310,9 @@ export const ImportReviewModal: React.FC<{
             <IconButton label={`Togli ${r.name || 'riga'}`} tone="danger" className="sm:order-last" onClick={() => setRows(list => list.filter(x => x.id !== r.id))}>
               <Trash2 className="h-4 w-4" />
             </IconButton>
-            <Input aria-label="Ruolo" value={r.role} onChange={e => update(r.id, 'role', e.target.value)} placeholder="Ruolo" />
-            <Input aria-label="Telefono" className="font-mono" value={r.whatsapp} onChange={e => update(r.id, 'whatsapp', e.target.value)} placeholder="Telefono" />
+            {/* Su telefono ruolo e numero vanno a tutta larghezza: affiancati restavano troppo stretti per scriverci. */}
+            <Input aria-label="Ruolo" className="max-sm:col-span-2" value={r.role} onChange={e => update(r.id, 'role', e.target.value)} placeholder="Ruolo" />
+            <Input aria-label="Telefono" className="font-mono max-sm:col-span-2" value={r.whatsapp} onChange={e => update(r.id, 'whatsapp', e.target.value)} placeholder="Telefono" />
           </div>
         ))}
       </div>
