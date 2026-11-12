@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, FileText, FileUp, RefreshCw } from 'lucide-react';
 import type { FormAppearance, FormField } from '../types';
 import { supabase } from '../lib/supabase';
-import { FILE_PREFIX, SUBMISSION_BUCKET, safeHttpsUrl } from '../lib/forms';
+import { FILE_PREFIX, SUBMISSION_BUCKET, formThemeStyle, safeHexColor, safeHttpsUrl } from '../lib/forms';
 import { compressImage } from '../lib/image';
 import SignaturePad, { type SignaturePadHandle } from '../components/SignaturePad';
 import { Button, Field, inputClass } from '../components/ui';
@@ -91,9 +91,16 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
   const cover = safeHttpsUrl(info?.appearance?.coverUrl);
   const logo = safeHttpsUrl(info?.appearance?.logoUrl);
   const documentUrl = safeHttpsUrl(info?.appearance?.documentUrl);
+  const background = safeHttpsUrl(info?.appearance?.backgroundUrl);
+  const accent = safeHexColor(info?.appearance?.accentColor);
+  const pageStyle: React.CSSProperties = {
+    ...formThemeStyle(info?.appearance),
+    ...(background ? { backgroundImage: `url(${JSON.stringify(background)})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' } : {}),
+  };
 
   const shell = (children: React.ReactNode) => (
-    <div className="min-h-dvh bg-paper">
+    // text-ink qui ricalcola il colore del testo con il tema del modulo, non con quello dell'app.
+    <div className="min-h-dvh bg-paper text-ink" style={pageStyle}>
       {cover && <img src={cover} alt="" className="block h-44 w-full object-cover sm:h-60" />}
       <header className="border-b border-line bg-paper-deep px-5 pb-4 pt-[max(1rem,env(safe-area-inset-top))]">
         <div className="mx-auto max-w-xl">
@@ -104,7 +111,10 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
           {info && <p className="font-display text-2xl leading-tight">{info.production_title}</p>}
         </div>
       </header>
-      <main className="mx-auto max-w-xl px-5 py-8 pb-16">{children}</main>
+      <main className="mx-auto max-w-xl px-5 py-8 pb-16">
+        {/* Con un'immagine di sfondo il contenuto sta su un foglio, così resta leggibile. */}
+        {background ? <div className="rounded-[4px] bg-card/95 p-5 shadow-[0_8px_30px_rgba(0,0,0,0.18)] sm:p-7">{children}</div> : children}
+      </main>
     </div>
   );
 
@@ -142,6 +152,7 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
         <p className="mt-2 text-ink-soft">Compila i tuoi dati per la produzione. Servono pochi minuti; i campi con * sono obbligatori.</p>
         {documentUrl && (
           <a href={documentUrl} target="_blank" rel="noopener noreferrer"
+            style={accent ? { textDecorationColor: accent } : undefined}
             className="mt-4 inline-flex items-center gap-2 font-medium text-ink underline decoration-manila decoration-2 underline-offset-4 hover:decoration-ink">
             <FileText aria-hidden className="h-4 w-4 shrink-0" />
             {info.appearance?.documentLabel?.trim() || 'Leggi qui il documento'}
@@ -198,7 +209,7 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
       })}
 
       <label className="flex gap-3 rounded-[3px] border border-line bg-card p-4 text-sm">
-        <input type="checkbox" checked={consent} onChange={e => { setConsent(e.target.checked); setError(null); }} className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--color-ink)]" />
+        <input type="checkbox" checked={consent} onChange={e => { setConsent(e.target.checked); setError(null); }} className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--form-accent,var(--color-ink))]" />
         <span>
           Acconsento al trattamento dei miei dati personali da parte della produzione “{info.production_title}”,
           solo per gli adempimenti legati al mio lavoro su questo progetto (Reg. UE 2016/679).
@@ -207,7 +218,8 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
 
       {error && <p role="alert" className="rounded-[3px] bg-cue/10 p-3 text-sm text-cue">{error}</p>}
 
-      <Button type="submit" className="w-full" disabled={state === 'sending'}>
+      <Button type="submit" className="w-full" disabled={state === 'sending'}
+        style={accent ? { background: 'var(--form-accent)', color: 'var(--form-accent-text)' } : undefined}>
         {state === 'sending' ? 'Invio in corso…' : 'Invia il modulo'}
       </Button>
     </form>,

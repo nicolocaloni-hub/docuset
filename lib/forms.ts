@@ -1,4 +1,4 @@
-import type { FormField, Person, Production } from '../types';
+import type { FormAppearance, FormField, Person, Production } from '../types';
 import { compressImage } from './image';
 import { supabase } from './supabase';
 
@@ -43,8 +43,43 @@ export const safeHttpsUrl = (value?: string) => {
 
 const BRANDING_BUCKET = 'branding';
 
-/** Carica copertina o logo del modulo (cartella pubblica in lettura) e ne restituisce l'indirizzo. */
-export const uploadBrandingImage = async (file: File, userId: string, productionId: string, kind: 'cover' | 'logo') => {
+/** Colori di base del modulo pubblico. Sostituiscono i colori dell'app solo dentro il modulo. */
+export const FORM_THEMES = {
+  docuset: { label: 'DocuSet', colors: {} as Record<string, string>, swatch: ['#F3EEE3', '#2A251D'] },
+  bianco: {
+    label: 'Bianco',
+    colors: { paper: '#FFFFFF', 'paper-deep': '#F4F4F5', card: '#FFFFFF', line: '#E4E4E7', ink: '#18181B', 'ink-soft': '#52525B', manila: '#A1A1AA', 'manila-ink': '#3F3F46' },
+    swatch: ['#FFFFFF', '#18181B'],
+  },
+  scuro: {
+    label: 'Scuro',
+    colors: { paper: '#141416', 'paper-deep': '#1F1F23', card: '#1B1B1F', line: '#34343A', ink: '#F4F4F5', 'ink-soft': '#A1A1AA', manila: '#71717A', 'manila-ink': '#D4D4D8' },
+    swatch: ['#141416', '#F4F4F5'],
+  },
+} as const;
+
+/** Solo #RRGGBB: il colore finisce in uno stile, niente altro deve passare. */
+export const safeHexColor = (value?: string) => (/^#[0-9a-f]{6}$/i.test(value ?? '') ? value! : '');
+
+/** Testo bianco o nero, quello che si legge meglio sopra il colore. */
+export const textOnColor = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? '#18181B' : '#FFFFFF';
+};
+
+/** Variabili CSS del tema scelto, da mettere sul contenitore del modulo. */
+export const formThemeStyle = (look?: FormAppearance | null): Record<string, string> => {
+  const theme = FORM_THEMES[look?.theme ?? 'docuset'] ?? FORM_THEMES.docuset;
+  const style: Record<string, string> = {};
+  for (const [name, value] of Object.entries(theme.colors)) style[`--color-${name}`] = value;
+  const accent = safeHexColor(look?.accentColor);
+  if (accent) { style['--form-accent'] = accent; style['--form-accent-text'] = textOnColor(accent); }
+  return style;
+};
+
+/** Carica copertina, logo o sfondo del modulo (cartella pubblica in lettura) e ne restituisce l'indirizzo. */
+export const uploadBrandingImage = async (file: File, userId: string, productionId: string, kind: 'cover' | 'logo' | 'background') => {
   const client = requireClient();
   const { blob, type, ext } = await compressImage(file);
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) throw new Error('Usa un’immagine JPG, PNG o WebP.');
