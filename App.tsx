@@ -491,7 +491,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       )}
       {dialog?.kind === 'production' && <ProductionModal onClose={() => setDialog(null)} onSave={createProduction} />}
       {dialog?.kind === 'settings' && (
-        <SettingsModal production={production} data={data} accountEmail={email} formsEnabled={formsEnabled}
+        <SettingsModal production={production} data={data} accountEmail={email} formsEnabled={formsEnabled} userId={userId}
           onClose={() => setDialog(null)}
           onSave={patch => { setData(prev => ({ ...prev, productions: prev.productions.map(p => (p.id === production.id ? { ...p, ...patch } : p)) })); setDialog(null); toast('Impostazioni salvate.'); }}
           onDeleteProduction={() => setDialog({ kind: 'delete-production' })}

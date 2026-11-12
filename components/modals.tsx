@@ -1,10 +1,55 @@
 import React, { useRef, useState } from 'react';
-import { Compass, Download, LogOut, Plus, Trash2, Upload, X } from 'lucide-react';
-import type { AppState, FormField, Person, Production, Template } from '../types';
-import { PRESET_FIELDS, productionFields } from '../lib/forms';
+import { Compass, Download, ImagePlus, LogOut, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react';
+import type { AppState, FormAppearance, FormField, Person, Production, Template } from '../types';
+import { PRESET_FIELDS, productionFields, safeHttpsUrl, uploadBrandingImage } from '../lib/forms';
 import { DEFAULT_INVITE_TEMPLATE, DEFAULT_SOLICIT_TEMPLATE, TEMPLATE_VARIABLES, missingVariables } from '../services/whatsapp';
 import { normalizeState } from '../lib/useAppData';
 import { Button, Field, IconButton, Input, Modal, inputClass } from './ui';
+
+/* ---------- Aspetto del modulo ---------- */
+
+/** Toglie i campi vuoti; il link al documento resta solo se https. */
+const cleanLook = (look: FormAppearance): FormAppearance | undefined => {
+  const clean: FormAppearance = {
+    documentLabel: look.documentLabel?.trim() || undefined,
+    documentUrl: safeHttpsUrl(look.documentUrl) || undefined,
+    coverUrl: look.coverUrl,
+    logoUrl: look.logoUrl,
+  };
+  return Object.values(clean).some(Boolean) ? clean : undefined;
+};
+
+const ImagePicker: React.FC<{ label: string; hint: string; url?: string; wide?: boolean; onPick: (file: File) => Promise<void>; onRemove: () => void }> = ({ label, hint, url, wide, onPick, onRemove }) => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true); setError(null);
+    try { await onPick(file); } catch (err) { setError(err instanceof Error ? err.message : 'Caricamento non riuscito.'); }
+    setBusy(false);
+  };
+  return (
+    <div>
+      <p className="mb-1.5 text-sm font-medium">{label}</p>
+      <div className="flex items-center gap-3 rounded-[3px] border border-line bg-card p-2">
+        <div className={`flex shrink-0 items-center justify-center overflow-hidden bg-paper-deep ${wide ? 'h-14 w-24 rounded-[3px]' : 'h-14 w-14 rounded-full'}`}>
+          {url ? <img src={url} alt="" className="h-full w-full object-cover" /> : <ImagePlus aria-hidden className="h-5 w-5 text-ink-soft" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium underline-offset-4 hover:underline">
+            {busy && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+            {busy ? 'Caricamento…' : url ? 'Cambia' : 'Scegli immagine'}
+            <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={busy} onChange={pick} />
+          </label>
+          <p className="truncate text-xs text-ink-soft">{error ? <span className="text-cue">{error}</span> : hint}</p>
+        </div>
+        {url && !busy && <IconButton label={`Togli ${label.toLowerCase()}`} tone="danger" onClick={onRemove}><X className="h-4 w-4" /></IconButton>}
+      </div>
+    </div>
+  );
+};
 
 /* ---------- Persona: nuova o modifica ---------- */
 
@@ -61,13 +106,15 @@ export const SettingsModal: React.FC<{
   accountEmail: string | null;
   /** Modulo DocuSet disponibile (Supabase collegato e accesso fatto). */
   formsEnabled: boolean;
-  onSave: (patch: Pick<Production, 'title' | 'formFields' | 'whatsappMessageTemplate' | 'whatsappSolicitTemplate'>) => void;
+  /** Serve per caricare copertina e logo nella cartella dell'account. */
+  userId: string | null;
+  onSave: (patch: Pick<Production, 'title' | 'formFields' | 'whatsappMessageTemplate' | 'whatsappSolicitTemplate' | 'formAppearance'>) => void;
   onDeleteProduction: () => void;
   onRestore: (state: AppState) => void;
   onRestartTour: () => void;
   onSignOut?: () => void;
   onClose: () => void;
-}> = ({ production, data, accountEmail, formsEnabled, onSave, onDeleteProduction, onRestore, onRestartTour, onSignOut, onClose }) => {
+}> = ({ production, data, accountEmail, formsEnabled, userId, onSave, onDeleteProduction, onRestore, onRestartTour, onSignOut, onClose }) => {
   const [title, setTitle] = useState(production.title);
   const [fields, setFields] = useState<FormField[]>(productionFields(production));
   const [customLabel, setCustomLabel] = useState('');
@@ -76,9 +123,12 @@ export const SettingsModal: React.FC<{
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const restoreRef = useRef<HTMLInputElement>(null);
 
+  const [look, setLook] = useState<FormAppearance>(production.formAppearance ?? {});
+  const documentUrlInvalid = Boolean(look.documentUrl?.trim()) && !safeHttpsUrl(look.documentUrl);
+
   const inviteMissing = missingVariables(invite);
   const solicitMissing = missingVariables(solicit);
-  const canSave = title.trim() && !inviteMissing.length && !solicitMissing.length && fields.length > 0;
+  const canSave = title.trim() && !inviteMissing.length && !solicitMissing.length && fields.length > 0 && !documentUrlInvalid;
 
   // I campi predefiniti restano nel loro ordine; quelli aggiunti a mano vanno in fondo.
   const togglePreset = (preset: FormField, on: boolean) => setFields(list => on
@@ -124,7 +174,7 @@ export const SettingsModal: React.FC<{
   return (
     <Modal title="Impostazioni" onClose={onClose} wide
       footer={<><Button variant="ghost" onClick={onClose}>Annulla</Button>
-        <Button disabled={!canSave} onClick={() => onSave({ title: title.trim(), formFields: fields, whatsappMessageTemplate: invite, whatsappSolicitTemplate: solicit })}>Salva</Button></>}>
+        <Button disabled={!canSave} onClick={() => onSave({ title: title.trim(), formFields: fields, whatsappMessageTemplate: invite, whatsappSolicitTemplate: solicit, formAppearance: cleanLook(look) })}>Salva</Button></>}>
       <div className="space-y-5">
         <Field label="Titolo della produzione"><Input value={title} onChange={e => setTitle(e.target.value)} /></Field>
         <div>
@@ -173,6 +223,31 @@ export const SettingsModal: React.FC<{
             </div>
           </div>
         </div>
+
+        <div className="space-y-3">
+          <p className="text-sm font-medium">Aspetto del modulo</p>
+          <div className="grid gap-3 sm:grid-cols-[1fr_2fr]">
+            <Field label="Testo del link">
+              <Input value={look.documentLabel ?? ''} onChange={e => setLook({ ...look, documentLabel: e.target.value })} placeholder="Leggi qui la liberatoria" />
+            </Field>
+            <Field label="Link al documento da leggere" hint={documentUrlInvalid ? <span className="text-cue">Serve un link che inizia con https://</span> : 'Es. il PDF su Google Drive, condiviso in sola visualizzazione.'}>
+              <Input type="url" inputMode="url" value={look.documentUrl ?? ''} onChange={e => setLook({ ...look, documentUrl: e.target.value })} placeholder="https://drive.google.com/…" />
+            </Field>
+          </div>
+          {formsEnabled && userId ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ImagePicker label="Copertina" hint="Foto in alto, orizzontale" url={look.coverUrl} wide
+                onPick={file => uploadBrandingImage(file, userId, production.id, 'cover').then(coverUrl => setLook(l => ({ ...l, coverUrl })))}
+                onRemove={() => setLook(l => ({ ...l, coverUrl: undefined }))} />
+              <ImagePicker label="Logo" hint="Quadrato, appare nel cerchio" url={look.logoUrl}
+                onPick={file => uploadBrandingImage(file, userId, production.id, 'logo').then(logoUrl => setLook(l => ({ ...l, logoUrl })))}
+                onRemove={() => setLook(l => ({ ...l, logoUrl: undefined }))} />
+            </div>
+          ) : (
+            <p className="rounded-[3px] bg-paper-deep p-3 text-sm text-ink-soft">Copertina e logo si caricano dopo l'accesso online.</p>
+          )}
+        </div>
+
         <Field label="Messaggio WhatsApp: invio" hint={variablesHint(inviteMissing)}>
           <textarea value={invite} onChange={e => setInvite(e.target.value)} rows={5} className={inputClass} />
         </Field>

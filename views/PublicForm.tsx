@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, FileUp, RefreshCw } from 'lucide-react';
-import type { FormField } from '../types';
+import { CheckCircle2, FileText, FileUp, RefreshCw } from 'lucide-react';
+import type { FormAppearance, FormField } from '../types';
 import { supabase } from '../lib/supabase';
-import { FILE_PREFIX, SUBMISSION_BUCKET } from '../lib/forms';
+import { FILE_PREFIX, SUBMISSION_BUCKET, safeHttpsUrl } from '../lib/forms';
 import { compressImage } from '../lib/image';
 import SignaturePad, { type SignaturePadHandle } from '../components/SignaturePad';
 import { Button, Field, inputClass } from '../components/ui';
@@ -17,6 +17,7 @@ interface FormInfo {
   person_name: string;
   fields: FormField[];
   submitted_at: string | null;
+  appearance: FormAppearance | null;
 }
 
 /** Modulo compilato da cast e troupe dal link personale, senza account. */
@@ -86,10 +87,19 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
     }
   };
 
+  // Immagini e link scelti dalla produzione: si usano solo se sono indirizzi https.
+  const cover = safeHttpsUrl(info?.appearance?.coverUrl);
+  const logo = safeHttpsUrl(info?.appearance?.logoUrl);
+  const documentUrl = safeHttpsUrl(info?.appearance?.documentUrl);
+
   const shell = (children: React.ReactNode) => (
     <div className="min-h-dvh bg-paper">
+      {cover && <img src={cover} alt="" className="block h-44 w-full object-cover sm:h-60" />}
       <header className="border-b border-line bg-paper-deep px-5 pb-4 pt-[max(1rem,env(safe-area-inset-top))]">
         <div className="mx-auto max-w-xl">
+          {logo && (
+            <img src={logo} alt="" className={`mb-3 h-20 w-20 rounded-full border-4 border-paper-deep bg-card object-cover shadow-[0_2px_10px_rgba(42,37,29,0.18)] ${cover ? '-mt-14' : ''}`} />
+          )}
           <p className="font-mono text-[11px] uppercase tracking-widest text-ink-soft">DocuSet · Modulo produzione</p>
           {info && <p className="font-display text-2xl leading-tight">{info.production_title}</p>}
         </div>
@@ -130,6 +140,13 @@ const PublicForm: React.FC<{ token: string }> = ({ token }) => {
       <div>
         <h1 className="font-display text-3xl leading-tight">Ciao {info.person_name.split(' ')[0]}</h1>
         <p className="mt-2 text-ink-soft">Compila i tuoi dati per la produzione. Servono pochi minuti; i campi con * sono obbligatori.</p>
+        {documentUrl && (
+          <a href={documentUrl} target="_blank" rel="noopener noreferrer"
+            className="mt-4 inline-flex items-center gap-2 font-medium text-ink underline decoration-manila decoration-2 underline-offset-4 hover:decoration-ink">
+            <FileText aria-hidden className="h-4 w-4 shrink-0" />
+            {info.appearance?.documentLabel?.trim() || 'Leggi qui il documento'}
+          </a>
+        )}
       </div>
 
       {info.fields.map(field => {
