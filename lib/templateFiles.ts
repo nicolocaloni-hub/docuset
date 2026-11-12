@@ -22,7 +22,11 @@ export const storeTemplateFile = async (file: Blob, templateId: string, userId: 
 
 /** URL apribile per il template: per i file privati è un link firmato valido 5 minuti. */
 export const templateFileUrl = async (fileUrl: string) => {
-  if (!fileUrl.startsWith(REMOTE_PREFIX)) return fileUrl;
+  if (!fileUrl.startsWith(REMOTE_PREFIX)) {
+    // Arriva anche da un backup importato: mai aprire `javascript:` o simili.
+    if (/^(data:|https:)/i.test(fileUrl)) return fileUrl;
+    throw new Error('Il file di questo template non è valido: caricalo di nuovo.');
+  }
   if (!supabase) throw new Error('Questo template è salvato online: accedi per aprirlo.');
   const { data, error } = await supabase.storage
     .from(TEMPLATE_BUCKET)
