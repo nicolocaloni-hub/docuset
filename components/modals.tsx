@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Compass, Download, ImagePlus, LogOut, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react';
 import type { AppState, FormAppearance, FormField, Person, Production, Template } from '../types';
-import { PRESET_FIELDS, productionFields, safeHttpsUrl, uploadBrandingImage } from '../lib/forms';
+import { FORM_THEMES, PRESET_FIELDS, productionFields, safeHexColor, safeHttpsUrl, uploadBrandingImage } from '../lib/forms';
 import { DEFAULT_INVITE_TEMPLATE, DEFAULT_SOLICIT_TEMPLATE, TEMPLATE_VARIABLES, missingVariables } from '../services/whatsapp';
 import { normalizeState } from '../lib/useAppData';
 import { Button, Field, IconButton, Input, Modal, inputClass } from './ui';
@@ -15,6 +15,9 @@ const cleanLook = (look: FormAppearance): FormAppearance | undefined => {
     documentUrl: safeHttpsUrl(look.documentUrl) || undefined,
     coverUrl: look.coverUrl,
     logoUrl: look.logoUrl,
+    theme: look.theme,
+    accentColor: safeHexColor(look.accentColor) || undefined,
+    backgroundUrl: look.backgroundUrl,
   };
   return Object.values(clean).some(Boolean) ? clean : undefined;
 };
@@ -245,6 +248,37 @@ export const SettingsModal: React.FC<{
             </div>
           ) : (
             <p className="rounded-[3px] bg-paper-deep p-3 text-sm text-ink-soft">Copertina e logo si caricano dopo l'accesso online.</p>
+          )}
+
+          <fieldset>
+            <legend className="mb-1.5 text-sm font-medium">Colori</legend>
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(FORM_THEMES) as Array<keyof typeof FORM_THEMES>).map(id => {
+                const selected = (look.theme ?? 'docuset') === id;
+                const [paper, ink] = FORM_THEMES[id].swatch;
+                return (
+                  <label key={id} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[3px] border bg-card px-3 text-sm ${selected ? 'border-ink' : 'border-line'}`}>
+                    <input type="radio" name="form-theme" className="sr-only" checked={selected} onChange={() => setLook(l => ({ ...l, theme: id === 'docuset' ? undefined : id }))} />
+                    <span aria-hidden className="h-5 w-5 rounded-full border border-line" style={{ background: `linear-gradient(135deg, ${paper} 50%, ${ink} 50%)` }} />
+                    {FORM_THEMES[id].label}
+                  </label>
+                );
+              })}
+              <label className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[3px] border bg-card px-3 text-sm ${look.accentColor ? 'border-ink' : 'border-line'}`}>
+                <input type="color" aria-label="Colore di pulsanti e link" value={safeHexColor(look.accentColor) || '#2A251D'}
+                  onChange={e => setLook(l => ({ ...l, accentColor: e.target.value }))} className="h-6 w-6 cursor-pointer rounded-full border-0 bg-transparent p-0" />
+                Pulsanti e link
+              </label>
+              {look.accentColor && (
+                <Button variant="ghost" onClick={() => setLook(l => ({ ...l, accentColor: undefined }))}>Colore predefinito</Button>
+              )}
+            </div>
+          </fieldset>
+
+          {formsEnabled && userId && (
+            <ImagePicker label="Sfondo" hint="Immagine a tutta pagina dietro il modulo" url={look.backgroundUrl} wide
+              onPick={file => uploadBrandingImage(file, userId, production.id, 'background').then(backgroundUrl => setLook(l => ({ ...l, backgroundUrl })))}
+              onRemove={() => setLook(l => ({ ...l, backgroundUrl: undefined }))} />
           )}
         </div>
 

@@ -66,6 +66,12 @@ export interface FormAppearance {
   documentUrl?: string;
   coverUrl?: string;
   logoUrl?: string;
+  /** Colori di base del modulo; senza, quelli di DocuSet. */
+  theme?: 'docuset' | 'bianco' | 'scuro';
+  /** Colore di pulsanti e link, es. #1F6FEB. */
+  accentColor?: string;
+  /** Immagine di sfondo a tutta pagina. */
+  backgroundUrl?: string;
 }
 
 export interface Production {
