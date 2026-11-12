@@ -60,10 +60,19 @@ export interface FormField {
   required: boolean;
 }
 
+/** Come appare il modulo pubblico: documento da leggere, copertina e logo. */
+export interface FormAppearance {
+  documentLabel?: string;
+  documentUrl?: string;
+  coverUrl?: string;
+  logoUrl?: string;
+}
+
 export interface Production {
   id: string;
   title: string;
   createdAt: string;
+  formAppearance?: FormAppearance;
   notes?: string;
   producerPhone?: string;
   formFields?: FormField[];

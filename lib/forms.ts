@@ -1,4 +1,5 @@
 import type { FormField, Person, Production } from '../types';
+import { compressImage } from './image';
 import { supabase } from './supabase';
 
 export const SUBMISSION_BUCKET = 'submissions';
@@ -28,6 +29,29 @@ export const formUrl = (token: string, origin = window.location.origin) => `${or
 const requireClient = () => {
   if (!supabase) throw new Error('Il modulo DocuSet richiede Supabase collegato.');
   return supabase;
+};
+
+/** Solo link https: un indirizzo scritto a mano non deve poter eseguire codice nel modulo. */
+export const safeHttpsUrl = (value?: string) => {
+  try {
+    const url = new URL((value ?? '').trim());
+    return url.protocol === 'https:' ? url.href : '';
+  } catch {
+    return '';
+  }
+};
+
+const BRANDING_BUCKET = 'branding';
+
+/** Carica copertina o logo del modulo (cartella pubblica in lettura) e ne restituisce l'indirizzo. */
+export const uploadBrandingImage = async (file: File, userId: string, productionId: string, kind: 'cover' | 'logo') => {
+  const client = requireClient();
+  const { blob, type, ext } = await compressImage(file);
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) throw new Error('Usa un’immagine JPG, PNG o WebP.');
+  const path = `${userId}/${productionId}-${kind}-${Date.now()}.${ext}`;
+  const { error } = await client.storage.from(BRANDING_BUCKET).upload(path, blob, { contentType: type });
+  if (error) throw new Error(`Caricamento dell'immagine non riuscito: ${error.message}`);
+  return client.storage.from(BRANDING_BUCKET).getPublicUrl(path).data.publicUrl;
 };
 
 /** Crea o aggiorna il link personale della persona e ne restituisce il token. */
@@ -92,6 +116,24 @@ export const submissionFileUrl = async (value: string) => {
     .createSignedUrl(value.slice(FILE_PREFIX.length), 300);
   if (error || !data) throw new Error('Non riesco ad aprire il file caricato.');
   return data.signedUrl;
+};
+
+/** Carica copertina o logo del modulo e ne restituisce l'indirizzo pubblico. */
+export const uploadFormImage = async (userId: string, productionId: string, kind: 'cover' | 'logo', file: File) => {
+  const client = requireClient();
+  const { blob, type, ext } = await compressImage(file);
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) throw new Error('Usa un’immagine JPG, PNG o WebP.');
+  if (blob.size > 5 * 1024 * 1024) throw new Error('L’immagine supera i 5 MB anche dopo la compressione.');
+  const path = `${userId}/${productionId}/${kind}-${crypto.randomUUID()}.${ext}`;
+  const { error } = await client.storage.from(BRANDING_BUCKET).upload(path, blob, { contentType: type });
+  if (error) throw new Error('Caricamento dell’immagine non riuscito.');
+  return client.storage.from(BRANDING_BUCKET).getPublicUrl(path).data.publicUrl;
+};
+
+/** Toglie un'immagine caricata con uploadFormImage; gli indirizzi di altri siti vengono ignorati. */
+export const removeFormImage = async (url: string) => {
+  const path = url.split(`/object/public/${BRANDING_BUCKET}/`)[1];
+  if (path) await requireClient().storage.from(BRANDING_BUCKET).remove([decodeURIComponent(path)]);
 };
 
 /** Cancella link, risposte e file delle persone indicate (o dell'intera produzione). */
