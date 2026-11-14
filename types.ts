@@ -45,6 +45,8 @@ export interface Person {
   email?: string;
   notes?: string;
   hubToken: string;
+  /** Quale modulo riceve; senza, si sceglie dal ruolo. */
+  formKind?: FormKind;
   fieldsJSON?: string;
   removedAt?: string;
   deliveredAt?: string; // Data di consegna del modulo
@@ -74,10 +76,21 @@ export interface FormAppearance {
   backgroundUrl?: string;
 }
 
+/** I quattro moduli di una produzione: ognuno ha domande e aspetto suoi. */
+export type FormKind = 'troupe' | 'attori' | 'regista' | 'comparse';
+
+/** Un modulo modificato; quello mai toccato usa formFields e formAppearance della produzione. */
+export interface ProductionForm {
+  fields?: FormField[];
+  appearance?: FormAppearance;
+}
+
 export interface Production {
   id: string;
   title: string;
   createdAt: string;
+  forms?: Partial<Record<FormKind, ProductionForm>>;
+  /** Aspetto di partenza dei moduli, da prima che ce ne fossero quattro. */
   formAppearance?: FormAppearance;
   notes?: string;
   producerPhone?: string;

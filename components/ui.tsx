@@ -43,7 +43,8 @@ export const IconButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> 
 /* ---------- Campi ---------- */
 
 export const Field: React.FC<{ label: string; hint?: React.ReactNode; children: React.ReactNode }> = ({ label, hint, children }) => (
-  <label className="block">
+  // relative: un campo sr-only dentro (es. scelta file) resta qui e non fa scorrere la pagina altrove.
+  <label className="relative block">
     <span className="mb-1.5 block text-sm font-medium text-ink">{label}</span>
     {children}
     {hint && <span className="mt-1.5 block text-xs text-ink-soft">{hint}</span>}
