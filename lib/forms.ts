@@ -1,4 +1,4 @@
-import type { FormAppearance, FormField, Person, Production } from '../types';
+import type { FormAppearance, FormField, FormKind, Person, Production } from '../types';
 import { compressImage } from './image';
 import { supabase } from './supabase';
 
@@ -23,6 +23,33 @@ export const PRESET_FIELDS: FormField[] = [
 
 export const productionFields = (production: Production): FormField[] =>
   production.formFields?.length ? production.formFields : PRESET_FIELDS;
+
+export const FORM_KINDS: { id: FormKind; label: string }[] = [
+  { id: 'troupe', label: 'Troupe' },
+  { id: 'attori', label: 'Attori' },
+  { id: 'regista', label: 'Regista' },
+  { id: 'comparse', label: 'Comparse' },
+];
+
+export const formKindLabel = (kind: FormKind) => FORM_KINDS.find(k => k.id === kind)?.label ?? 'Troupe';
+
+/** Modulo suggerito dal ruolo: «Aiuto regia» resta troupe, solo «Regista» va al modulo della regia. */
+export const guessFormKind = (person: Pick<Person, 'role' | 'department'>): FormKind => {
+  const role = (person.role ?? '').toLowerCase();
+  const all = `${role} ${(person.department ?? '').toLowerCase()}`;
+  if (/\bcompars|figurazion/.test(all)) return 'comparse';
+  if (/\bregist[ae]\b/.test(role) && !/aiuto|assist/.test(role)) return 'regista';
+  if (/\battor|\battric|\bcast\b|interpret/.test(all)) return 'attori';
+  return 'troupe';
+};
+
+export const personFormKind = (person: Person): FormKind => person.formKind ?? guessFormKind(person);
+
+/** Domande e aspetto di un modulo; quello mai modificato parte dalle impostazioni della produzione. */
+export const productionForm = (production: Production, kind: FormKind) => ({
+  fields: production.forms?.[kind]?.fields?.length ? production.forms[kind]!.fields! : productionFields(production),
+  appearance: production.forms?.[kind]?.appearance ?? production.formAppearance ?? {},
+});
 
 export const formUrl = (token: string, origin = window.location.origin) => `${origin}/m/${token}`;
 
@@ -90,8 +117,10 @@ export const uploadBrandingImage = async (file: File, userId: string, production
 };
 
 /** Crea o aggiorna il link personale della persona e ne restituisce il token. */
+// Un link per persona: cambiando modulo il link resta lo stesso e mostra il modulo nuovo.
 export const ensureFormLink = async (userId: string, production: Production, person: Person) => {
   const client = requireClient();
+  const kind = personFormKind(person);
   const { data, error } = await client
     .from('form_links')
     .upsert({
@@ -100,7 +129,8 @@ export const ensureFormLink = async (userId: string, production: Production, per
       person_id: person.id,
       production_title: production.title,
       person_name: person.name,
-      fields: productionFields(production),
+      form_kind: kind,
+      fields: productionForm(production, kind).fields,
       expires_at: new Date(Date.now() + LINK_DAYS * 86_400_000).toISOString(),
     }, { onConflict: 'owner_id,production_id,person_id' })
     .select('token')

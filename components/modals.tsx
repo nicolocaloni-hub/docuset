@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { Compass, Download, ImagePlus, LogOut, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react';
-import type { AppState, FormAppearance, FormField, Person, Production, Template } from '../types';
-import { FORM_THEMES, PRESET_FIELDS, productionFields, safeHexColor, safeHttpsUrl, uploadBrandingImage } from '../lib/forms';
+import { Compass, Download, ImagePlus, Link2, LogOut, RefreshCw, Trash2, Upload, X } from 'lucide-react';
+import type { AppState, FormAppearance, FormKind, Person, Production, Template } from '../types';
+import { FORM_KINDS, guessFormKind, safeHexColor, safeHttpsUrl } from '../lib/forms';
 import { DEFAULT_INVITE_TEMPLATE, DEFAULT_SOLICIT_TEMPLATE, TEMPLATE_VARIABLES, missingVariables } from '../services/whatsapp';
 import { normalizeState } from '../lib/useAppData';
 import { Button, Field, IconButton, Input, Modal, inputClass } from './ui';
@@ -9,7 +9,7 @@ import { Button, Field, IconButton, Input, Modal, inputClass } from './ui';
 /* ---------- Aspetto del modulo ---------- */
 
 /** Toglie i campi vuoti; il link al documento resta solo se https. */
-const cleanLook = (look: FormAppearance): FormAppearance | undefined => {
+export const cleanLook = (look: FormAppearance): FormAppearance | undefined => {
   const clean: FormAppearance = {
     documentLabel: look.documentLabel?.trim() || undefined,
     documentUrl: safeHttpsUrl(look.documentUrl) || undefined,
@@ -22,7 +22,7 @@ const cleanLook = (look: FormAppearance): FormAppearance | undefined => {
   return Object.values(clean).some(Boolean) ? clean : undefined;
 };
 
-const ImagePicker: React.FC<{ label: string; hint: string; url?: string; wide?: boolean; onPick: (file: File) => Promise<void>; onRemove: () => void }> = ({ label, hint, url, wide, onPick, onRemove }) => {
+export const ImagePicker: React.FC<{ label: string; hint: string; url?: string; wide?: boolean; onPick: (file: File) => Promise<void>; onRemove: () => void }> = ({ label, hint, url, wide, onPick, onRemove }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -41,7 +41,8 @@ const ImagePicker: React.FC<{ label: string; hint: string; url?: string; wide?: 
           {url ? <img src={url} alt="" className="h-full w-full object-cover" /> : <ImagePlus aria-hidden className="h-5 w-5 text-ink-soft" />}
         </div>
         <div className="min-w-0 flex-1">
-          <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium underline-offset-4 hover:underline">
+          {/* relative: tiene dentro l'etichetta il campo nascosto, altrimenti toccandolo il telefono scorre la finestra fuori schermo. */}
+          <label className="relative inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium underline-offset-4 hover:underline">
             {busy && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
             {busy ? 'Caricamento…' : url ? 'Cambia' : 'Scegli immagine'}
             <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={busy} onChange={pick} />
@@ -56,16 +57,19 @@ const ImagePicker: React.FC<{ label: string; hint: string; url?: string; wide?: 
 
 /* ---------- Persona: nuova o modifica ---------- */
 
-export type PersonDraft = Pick<Person, 'name' | 'role' | 'department' | 'whatsapp' | 'email' | 'notes'>;
+export type PersonDraft = Pick<Person, 'name' | 'role' | 'department' | 'whatsapp' | 'email' | 'notes' | 'formKind'>;
 
 export const PersonModal: React.FC<{
   initial?: Person;
   onSave: (draft: PersonDraft) => void;
+  /** Copia il link personale al modulo (solo online, persona già salvata). */
+  onCopyLink?: () => void;
   onClose: () => void;
-}> = ({ initial, onSave, onClose }) => {
+}> = ({ initial, onSave, onCopyLink, onClose }) => {
   const [draft, setDraft] = useState<PersonDraft>({
     name: initial?.name ?? '', role: initial?.role ?? '', department: initial?.department ?? '',
     whatsapp: initial?.whatsapp ?? '', email: initial?.email ?? '', notes: initial?.notes ?? '',
+    formKind: initial?.formKind,
   });
   const set = (key: keyof PersonDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft({ ...draft, [key]: e.target.value });
   const submit = (e?: React.FormEvent) => { e?.preventDefault(); if (draft.name.trim()) onSave({ ...draft, name: draft.name.trim() }); };
@@ -79,6 +83,17 @@ export const PersonModal: React.FC<{
         <Field label="Reparto"><Input value={draft.department} onChange={set('department')} placeholder="es. Suono" /></Field>
         <Field label="WhatsApp"><Input type="tel" value={draft.whatsapp} onChange={set('whatsapp')} placeholder="+39 333 000 0000" /></Field>
         <Field label="Email"><Input type="email" value={draft.email} onChange={set('email')} /></Field>
+        <div className="sm:col-span-2">
+          <Field label="Modulo da ricevere" hint={draft.formKind ? 'Scelto da te.' : 'Scelto in automatico dal ruolo.'}>
+            <select value={draft.formKind ?? guessFormKind(draft)} className={inputClass}
+              onChange={e => setDraft({ ...draft, formKind: e.target.value as FormKind })}>
+              {FORM_KINDS.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}
+            </select>
+          </Field>
+          {onCopyLink && (
+            <Button variant="secondary" className="mt-2" onClick={onCopyLink} icon={<Link2 className="h-4 w-4" />}>Copia il link del modulo</Button>
+          )}
+        </div>
         <div className="sm:col-span-2"><Field label="Note">
           <textarea value={draft.notes} onChange={set('notes')} rows={2} className={inputClass} />
         </Field></div>
@@ -111,39 +126,24 @@ export const SettingsModal: React.FC<{
   formsEnabled: boolean;
   /** Serve per caricare copertina e logo nella cartella dell'account. */
   userId: string | null;
-  onSave: (patch: Pick<Production, 'title' | 'formFields' | 'whatsappMessageTemplate' | 'whatsappSolicitTemplate' | 'formAppearance'>) => void;
+  onSave: (patch: Pick<Production, 'title' | 'whatsappMessageTemplate' | 'whatsappSolicitTemplate'>) => void;
+  /** Porta alla sezione Moduli, dove ora si modificano domande e aspetto. */
+  onOpenForms?: () => void;
   onDeleteProduction: () => void;
   onRestore: (state: AppState) => void;
   onRestartTour: () => void;
   onSignOut?: () => void;
   onClose: () => void;
-}> = ({ production, data, accountEmail, formsEnabled, userId, onSave, onDeleteProduction, onRestore, onRestartTour, onSignOut, onClose }) => {
+}> = ({ production, data, accountEmail, formsEnabled, userId, onSave, onDeleteProduction, onRestore, onRestartTour, onSignOut, onOpenForms, onClose }) => {
   const [title, setTitle] = useState(production.title);
-  const [fields, setFields] = useState<FormField[]>(productionFields(production));
-  const [customLabel, setCustomLabel] = useState('');
   const [invite, setInvite] = useState(production.whatsappMessageTemplate || DEFAULT_INVITE_TEMPLATE);
   const [solicit, setSolicit] = useState(production.whatsappSolicitTemplate || DEFAULT_SOLICIT_TEMPLATE);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const restoreRef = useRef<HTMLInputElement>(null);
 
-  const [look, setLook] = useState<FormAppearance>(production.formAppearance ?? {});
-  const documentUrlInvalid = Boolean(look.documentUrl?.trim()) && !safeHttpsUrl(look.documentUrl);
-
   const inviteMissing = missingVariables(invite);
   const solicitMissing = missingVariables(solicit);
-  const canSave = title.trim() && !inviteMissing.length && !solicitMissing.length && fields.length > 0 && !documentUrlInvalid;
-
-  // I campi predefiniti restano nel loro ordine; quelli aggiunti a mano vanno in fondo.
-  const togglePreset = (preset: FormField, on: boolean) => setFields(list => on
-    ? [...PRESET_FIELDS.filter(p => p.id === preset.id || list.some(f => f.id === p.id)), ...list.filter(f => !PRESET_FIELDS.some(p => p.id === f.id))]
-    : list.filter(f => f.id !== preset.id));
-  const toggleRequired = (id: string) => setFields(list => list.map(f => (f.id === id ? { ...f, required: !f.required } : f)));
-  const addCustom = () => {
-    const label = customLabel.trim();
-    if (!label) return;
-    setFields(list => [...list, { id: `custom-${crypto.randomUUID().slice(0, 8)}`, label, type: 'text', required: false }]);
-    setCustomLabel('');
-  };
+  const canSave = title.trim() && !inviteMissing.length && !solicitMissing.length ;
 
   const exportBackup = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -177,111 +177,13 @@ export const SettingsModal: React.FC<{
   return (
     <Modal title="Impostazioni" onClose={onClose} wide
       footer={<><Button variant="ghost" onClick={onClose}>Annulla</Button>
-        <Button disabled={!canSave} onClick={() => onSave({ title: title.trim(), formFields: fields, whatsappMessageTemplate: invite, whatsappSolicitTemplate: solicit, formAppearance: cleanLook(look) })}>Salva</Button></>}>
+        <Button disabled={!canSave} onClick={() => onSave({ title: title.trim(), whatsappMessageTemplate: invite, whatsappSolicitTemplate: solicit })}>Salva</Button></>}>
       <div className="space-y-5">
         <Field label="Titolo della produzione"><Input value={title} onChange={e => setTitle(e.target.value)} /></Field>
-        <div>
-          <p className="mb-1.5 text-sm font-medium">Modulo per cast e troupe</p>
-          {!formsEnabled && (
-            <p className="mb-2 rounded-[3px] bg-paper-deep p-3 text-sm text-ink-soft">Sei in modalità locale: i campi si salvano, ma i link al modulo partono solo dopo l'accesso online.</p>
-          )}
-          <div>
-            <p className="mb-2 text-sm text-ink-soft">Ogni persona riceve un link personale. Scegli cosa chiedere:</p>
-            <ul className="divide-y divide-line rounded-[3px] border border-line bg-card">
-              {PRESET_FIELDS.map(preset => {
-                const current = fields.find(f => f.id === preset.id);
-                return (
-                  <li key={preset.id} className="flex min-h-11 items-center gap-3 px-3">
-                    <label className="flex flex-1 items-center gap-3 text-sm">
-                      <input type="checkbox" className="h-4 w-4 accent-[var(--color-ink)]" checked={Boolean(current)}
-                        disabled={preset.id === 'nome'} onChange={e => togglePreset(preset, e.target.checked)} />
-                      {preset.label}
-                    </label>
-                    {current && preset.id !== 'nome' && (
-                      <button type="button" onClick={() => toggleRequired(preset.id)}
-                        className={`text-xs ${current.required ? 'text-ink' : 'text-ink-soft'} underline-offset-4 hover:underline`}>
-                        {current.required ? 'Obbligatorio' : 'Facoltativo'}
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
-              {fields.filter(f => !PRESET_FIELDS.some(p => p.id === f.id)).map(field => (
-                <li key={field.id} className="flex min-h-11 items-center gap-3 px-3 text-sm">
-                  <span className="flex-1">{field.label}</span>
-                  <button type="button" onClick={() => toggleRequired(field.id)}
-                    className={`text-xs ${field.required ? 'text-ink' : 'text-ink-soft'} underline-offset-4 hover:underline`}>
-                    {field.required ? 'Obbligatorio' : 'Facoltativo'}
-                  </button>
-                  <IconButton label={`Togli ${field.label}`} tone="danger" onClick={() => setFields(list => list.filter(f => f.id !== field.id))}>
-                    <X className="h-4 w-4" />
-                  </IconButton>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-2 flex gap-2">
-              <Input value={customLabel} onChange={e => setCustomLabel(e.target.value)} placeholder="Altra domanda, es. Taglia costume"
-                aria-label="Nuova domanda" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } }} />
-              <Button variant="secondary" onClick={addCustom} disabled={!customLabel.trim()} icon={<Plus className="h-4 w-4" />}>Aggiungi</Button>
-            </div>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[3px] border border-line bg-card p-3">
+          <p className="text-sm text-ink-soft">Domande, colori e immagini dei moduli ora sono nella sezione Moduli.</p>
+          {onOpenForms && <Button variant="secondary" onClick={onOpenForms}>Apri Moduli</Button>}
         </div>
-
-        <div className="space-y-3">
-          <p className="text-sm font-medium">Aspetto del modulo</p>
-          <div className="grid gap-3 sm:grid-cols-[1fr_2fr]">
-            <Field label="Testo del link">
-              <Input value={look.documentLabel ?? ''} onChange={e => setLook({ ...look, documentLabel: e.target.value })} placeholder="Leggi qui la liberatoria" />
-            </Field>
-            <Field label="Link al documento da leggere" hint={documentUrlInvalid ? <span className="text-cue">Serve un link che inizia con https://</span> : 'Es. il PDF su Google Drive, condiviso in sola visualizzazione.'}>
-              <Input type="url" inputMode="url" value={look.documentUrl ?? ''} onChange={e => setLook({ ...look, documentUrl: e.target.value })} placeholder="https://drive.google.com/…" />
-            </Field>
-          </div>
-          {formsEnabled && userId ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <ImagePicker label="Copertina" hint="Foto in alto, orizzontale" url={look.coverUrl} wide
-                onPick={file => uploadBrandingImage(file, userId, production.id, 'cover').then(coverUrl => setLook(l => ({ ...l, coverUrl })))}
-                onRemove={() => setLook(l => ({ ...l, coverUrl: undefined }))} />
-              <ImagePicker label="Logo" hint="Quadrato, appare nel cerchio" url={look.logoUrl}
-                onPick={file => uploadBrandingImage(file, userId, production.id, 'logo').then(logoUrl => setLook(l => ({ ...l, logoUrl })))}
-                onRemove={() => setLook(l => ({ ...l, logoUrl: undefined }))} />
-            </div>
-          ) : (
-            <p className="rounded-[3px] bg-paper-deep p-3 text-sm text-ink-soft">Copertina e logo si caricano dopo l'accesso online.</p>
-          )}
-
-          <fieldset>
-            <legend className="mb-1.5 text-sm font-medium">Colori</legend>
-            <div className="flex flex-wrap gap-2">
-              {(Object.keys(FORM_THEMES) as Array<keyof typeof FORM_THEMES>).map(id => {
-                const selected = (look.theme ?? 'docuset') === id;
-                const [paper, ink] = FORM_THEMES[id].swatch;
-                return (
-                  <label key={id} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[3px] border bg-card px-3 text-sm ${selected ? 'border-ink' : 'border-line'}`}>
-                    <input type="radio" name="form-theme" className="sr-only" checked={selected} onChange={() => setLook(l => ({ ...l, theme: id === 'docuset' ? undefined : id }))} />
-                    <span aria-hidden className="h-5 w-5 rounded-full border border-line" style={{ background: `linear-gradient(135deg, ${paper} 50%, ${ink} 50%)` }} />
-                    {FORM_THEMES[id].label}
-                  </label>
-                );
-              })}
-              <label className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[3px] border bg-card px-3 text-sm ${look.accentColor ? 'border-ink' : 'border-line'}`}>
-                <input type="color" aria-label="Colore di pulsanti e link" value={safeHexColor(look.accentColor) || '#2A251D'}
-                  onChange={e => setLook(l => ({ ...l, accentColor: e.target.value }))} className="h-6 w-6 cursor-pointer rounded-full border-0 bg-transparent p-0" />
-                Pulsanti e link
-              </label>
-              {look.accentColor && (
-                <Button variant="ghost" onClick={() => setLook(l => ({ ...l, accentColor: undefined }))}>Colore predefinito</Button>
-              )}
-            </div>
-          </fieldset>
-
-          {formsEnabled && userId && (
-            <ImagePicker label="Sfondo" hint="Immagine a tutta pagina dietro il modulo" url={look.backgroundUrl} wide
-              onPick={file => uploadBrandingImage(file, userId, production.id, 'background').then(backgroundUrl => setLook(l => ({ ...l, backgroundUrl })))}
-              onRemove={() => setLook(l => ({ ...l, backgroundUrl: undefined }))} />
-          )}
-        </div>
-
         <Field label="Messaggio WhatsApp: invio" hint={variablesHint(inviteMissing)}>
           <textarea value={invite} onChange={e => setInvite(e.target.value)} rows={5} className={inputClass} />
         </Field>

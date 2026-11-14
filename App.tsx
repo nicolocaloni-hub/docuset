@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { CheckCircle2, FileText, Inbox, LayoutGrid, Plus, RefreshCw, Settings, Users } from 'lucide-react';
-import { type AppState, type Person, type Template, TemplateType } from './types';
+import { CheckCircle2, ClipboardList, FileText, Inbox, LayoutGrid, Plus, RefreshCw, Settings, Users } from 'lucide-react';
+import { type AppState, type FormKind, type Person, type ProductionForm, type Template, TemplateType } from './types';
 import { supabase } from './lib/supabase';
 import { type SyncStatus, useAppData } from './lib/useAppData';
 import { deleteTemplateFile, fetchTemplateBytes, storeTemplateFile, templateFileUrl } from './lib/templateFiles';
-import { applySubmissions, deleteFormData, ensureFormLink, fetchFormState, formUrl, isSubmissionFile, submissionFileUrl } from './lib/forms';
+import { applySubmissions, deleteFormData, ensureFormLink, fetchFormState, formKindLabel, formUrl, isSubmissionFile, submissionFileUrl } from './lib/forms';
 import { extractCrewMembersFromFile, normalizePhone } from './services/documentExtraction';
 import { buildMessage, whatsappUrl } from './services/whatsapp';
 import { buildPersonPdf } from './services/personPdf';
@@ -18,16 +18,18 @@ import InstallPrompt from './components/InstallPrompt';
 import PublicForm from './views/PublicForm';
 import Dashboard from './views/Dashboard';
 import PeopleList from './views/PeopleList';
+import Forms from './views/Forms';
 import Responses from './views/Responses';
 import Templates from './views/Templates';
 
-type Tab = 'DASHBOARD' | 'PEOPLE' | 'REQUESTS' | 'SIGNED' | 'TEMPLATES';
+type Tab = 'DASHBOARD' | 'PEOPLE' | 'REQUESTS' | 'SIGNED' | 'FORMS' | 'TEMPLATES';
 
 const NAV: { id: Tab; label: string; short: string; icon: typeof Users }[] = [
   { id: 'DASHBOARD', label: 'Situazione', short: 'Situazione', icon: LayoutGrid },
   { id: 'PEOPLE', label: 'Cast & Crew', short: 'Persone', icon: Users },
   { id: 'REQUESTS', label: 'In attesa', short: 'In attesa', icon: Inbox },
   { id: 'SIGNED', label: 'Risposte', short: 'Risposte', icon: CheckCircle2 },
+  { id: 'FORMS', label: 'Moduli', short: 'Moduli', icon: ClipboardList },
   { id: 'TEMPLATES', label: 'Template', short: 'Template', icon: FileText },
 ];
 
@@ -150,6 +152,39 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       return;
     }
     updatePerson(person.id, solicit ? { solicitedAt: new Date().toISOString() } : { sentAt: new Date().toISOString() });
+  };
+
+  /* ---------- Link del modulo ---------- */
+
+  // Crea (o aggiorna) il link personale e lo copia: utile per mandarlo fuori da WhatsApp.
+  const copyFormLink = async (person: Person) => {
+    if (!production || !formsEnabled || !userId) {
+      toast('Il modulo funziona solo online: accedi con la tua email per avere i link.', 'error');
+      return;
+    }
+    let url: string;
+    try {
+      const token = await ensureFormLink(userId, production, person);
+      setFormTokens(map => new Map(map).set(`${production.id}/${person.id}`, token));
+      url = formUrl(token);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Non riesco a creare il link del modulo.', 'error');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      toast(`Link di ${person.name} copiato.`);
+    } catch {
+      toast(`Link di ${person.name}: ${url}`);
+    }
+  };
+
+  // Salvare un modulo cambia le domande: i link già pronti vanno riallineati al prossimo invio.
+  const saveForm = (kind: FormKind, form: ProductionForm) => {
+    if (!production) return;
+    setData(prev => ({ ...prev, productions: prev.productions.map(p => (p.id === production.id ? { ...p, forms: { ...p.forms, [kind]: form } } : p)) }));
+    setFormTokens(new Map());
+    toast(`Modulo ${formKindLabel(kind)} salvato.`);
   };
 
   /* ---------- Invio in sequenza ---------- */
@@ -307,7 +342,11 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
 
   const savePerson = (draft: PersonDraft, existing?: Person) => {
     const clean = { ...draft, whatsapp: normalizePhone(draft.whatsapp), role: draft.role || 'Crew', department: draft.department || 'Generale' };
-    if (existing) updatePerson(existing.id, clean);
+    if (existing) {
+      updatePerson(existing.id, clean);
+      // Cambiato modulo: il link resta lo stesso, ma va riallineato alle nuove domande prima del prossimo invio.
+      if (existing.formKind !== clean.formKind) setFormTokens(map => { const next = new Map(map); next.delete(`${existing.productionId}/${existing.id}`); return next; });
+    }
     else if (productionId) setData(prev => ({ ...prev, people: [...prev.people, { ...clean, id: `per-${crypto.randomUUID()}`, productionId, hubToken: crypto.randomUUID() }] }));
     setDialog(null);
   };
@@ -448,6 +487,9 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
             onOpenFile={openSubmissionFile}
             onRefresh={formsEnabled ? () => refreshForms(true) : undefined} refreshing={refreshing} />
         )}
+        {tab === 'FORMS' && production && (
+          <Forms key={production.id} production={production} people={people} formsEnabled={formsEnabled} userId={userId} onSave={saveForm} />
+        )}
         {tab === 'TEMPLATES' && (
           <Templates templates={data.templates} uploading={busy.template} onUpload={() => templateInput.current?.click()}
             onOpen={openTemplate} onDelete={template => setDialog({ kind: 'delete-template', template })} />
@@ -455,7 +497,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       </main>
 
       {/* Navigazione telefono */}
-      <nav aria-label="Sezioni" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-ink/10 bg-paper pb-[env(safe-area-inset-bottom)] lg:hidden">
+      <nav aria-label="Sezioni" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-ink/10 bg-paper pb-[env(safe-area-inset-bottom)] lg:hidden">
         {NAV.map(item => (
           <button key={item.id} type="button" data-tour={`nav-${item.id}`} onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}
             className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] ${tab === item.id ? 'text-ink' : 'text-ink-soft'}`}>
@@ -487,7 +529,8 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
       )}
 
       {dialog?.kind === 'person' && (
-        <PersonModal initial={dialog.person} onClose={() => setDialog(null)} onSave={draft => savePerson(draft, dialog.person)} />
+        <PersonModal initial={dialog.person} onClose={() => setDialog(null)} onSave={draft => savePerson(draft, dialog.person)}
+          onCopyLink={dialog.person && formsEnabled ? () => copyFormLink(dialog.person!) : undefined} />
       )}
       {dialog?.kind === 'production' && <ProductionModal onClose={() => setDialog(null)} onSave={createProduction} />}
       {dialog?.kind === 'settings' && (
@@ -496,6 +539,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
           onSave={patch => { setData(prev => ({ ...prev, productions: prev.productions.map(p => (p.id === production.id ? { ...p, ...patch } : p)) })); setDialog(null); toast('Impostazioni salvate.'); }}
           onDeleteProduction={() => setDialog({ kind: 'delete-production' })}
           onRestore={restoreBackup}
+          onOpenForms={() => { setDialog(null); setTab('FORMS'); }}
           onRestartTour={() => { setDialog(null); setTab('DASHBOARD'); setTourOpen(true); }}
           onSignOut={supabase && userId ? () => { supabase?.auth.signOut(); } : undefined} />
       )}
