@@ -137,6 +137,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
     const known = formTokens.get(`${production.id}/${person.id}`);
     // Senza token in memoria va creato: apro subito la finestra, dopo un await i browser bloccano i popup.
     const win = known ? null : window.open('', '_blank');
+    if (win) win.opener = null;
     try {
       const token = known ?? await ensureFormLink(userId, production, person);
       if (known) {
@@ -222,6 +223,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
 
   const openSubmissionFile = async (value: string) => {
     const win = window.open('', '_blank');
+    if (win) win.opener = null;
     try {
       const url = await submissionFileUrl(value);
       if (win) win.location.href = url; else window.open(url, '_blank');
@@ -297,6 +299,7 @@ const Workspace: React.FC<{ userId: string | null; email: string | null }> = ({ 
   const openTemplate = async (template: Template) => {
     // Apro la finestra subito: dopo un await i browser bloccano il popup.
     const win = window.open('', '_blank');
+    if (win) win.opener = null;
     try {
       const url = await templateFileUrl(template.fileUrl);
       if (url.startsWith('data:')) {
